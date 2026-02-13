@@ -7,8 +7,11 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 from typing import Optional
 
+import cv2
+from PIL import Image, ImageTk
+
 from motion import MotionController, MotionConfig
-from mock_camera import MockCamera
+from usbc_camera import USBCCamera
 from runner import run_inspection, RunConfig
 
 
@@ -17,7 +20,7 @@ class InspectionGUI:
     GUI for teeth inspection system with motor control and camera capture.
     """
 
-    def __init__(self, root: tk.Tk, motion: MotionController, camera: MockCamera):
+    def __init__(self, root: tk.Tk, motion: MotionController, camera: USBCCamera):
         self.root = root
         self.motion = motion
         self.camera = camera
@@ -27,12 +30,17 @@ class InspectionGUI:
         self.inspection_thread: Optional[threading.Thread] = None
         self.is_running = False
 
+        # Preview
+        self.preview_running = False
+        self.preview_label: Optional[tk.Label] = None
+
         # Setup window
         self.root.title("Teeth Inspection System")
-        self.root.geometry("700x600")
+        self.root.geometry("1100x600")
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         self._build_ui()
+        self._populate_camera_list()
         self._update_button_states()
 
     def _build_ui(self):
@@ -69,6 +77,12 @@ class InspectionGUI:
         self.browse_btn = ttk.Button(config_frame, text="Browse...", command=self._browse_directory)
         self.browse_btn.grid(row=3, column=2, padx=5, pady=2)
 
+        # Camera Index
+        ttk.Label(config_frame, text="Camera Index:").grid(row=4, column=0, sticky=tk.W, pady=2)
+        self.camera_index_var = tk.StringVar(value="0")
+        self.camera_index_combo = ttk.Combobox(config_frame, textvariable=self.camera_index_var, width=18, state="readonly")
+        self.camera_index_combo.grid(row=4, column=1, sticky=tk.W, padx=5, pady=2)
+
         # ========== Control Buttons Frame ==========
         control_frame = ttk.LabelFrame(self.root, text="Controls", padding=10)
         control_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -99,12 +113,37 @@ class InspectionGUI:
         self.exit_btn = ttk.Button(btn_row2, text="Exit", command=self._on_closing, width=15)
         self.exit_btn.pack(side=tk.LEFT, padx=5)
 
-        # ========== Log Display Frame ==========
-        log_frame = ttk.LabelFrame(self.root, text="Log", padding=10)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # ========== Camera Preview & Log Display (Side-by-Side) ==========
+        # Create a PanedWindow for resizable split
+        self.paned_window = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        self.paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
+        # Left pane: Camera Preview
+        preview_frame = ttk.LabelFrame(self.paned_window, text="Camera Preview", padding=10)
+        self.preview_label = tk.Label(preview_frame, bg="black", width=50, height=20)
+        self.preview_label.pack(fill=tk.BOTH, expand=True)
+        self.paned_window.add(preview_frame, weight=1)
+
+        # Right pane: Log Display
+        log_frame = ttk.LabelFrame(self.paned_window, text="Log", padding=10)
         self.log_text = scrolledtext.ScrolledText(log_frame, height=20, state=tk.DISABLED, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
+        self.paned_window.add(log_frame, weight=1)
+
+    def _populate_camera_list(self):
+        """Populate the camera index dropdown with available cameras."""
+        try:
+            available = USBCCamera.list_available_cameras(max_index=10)
+            if available:
+                self.camera_index_combo['values'] = [str(i) for i in available]
+                self.camera_index_var.set(str(available[0]))
+            else:
+                self.camera_index_combo['values'] = ['0']
+                self.camera_index_var.set('0')
+        except Exception as e:
+            self._log(f"⚠ Could not detect cameras: {e}")
+            self.camera_index_combo['values'] = ['0']
+            self.camera_index_var.set('0')
 
     def _browse_directory(self):
         """Open directory browser dialog."""
@@ -151,15 +190,25 @@ class InspectionGUI:
         self.captures_entry.config(state=state_config)
         self.outdir_entry.config(state=state_config)
         self.browse_btn.config(state=state_config)
+        
+        # Camera index only when not connected and not running
+        state_camera = "readonly" if not (connected or running) else tk.DISABLED
+        self.camera_index_combo.config(state=state_camera)
 
     def _toggle_connection(self):
         """Connect or disconnect from motion controller."""
         try:
             if self.motion.is_connected:
+                # Stop preview first
+                self.preview_running = False
+                
                 # Disconnect
                 self.motion.close()
                 self.camera.close()
                 self._log("✓ Disconnected from motion controller and camera")
+                
+                # Clear preview
+                self.preview_label.config(image='', text='Camera Disconnected', fg='white')
             else:
                 # Connect
                 port = self.port_var.get().strip()
@@ -167,11 +216,23 @@ class InspectionGUI:
                     messagebox.showerror("Error", "Please enter a COM port")
                     return
 
+                # Update camera device index from dropdown
+                try:
+                    camera_index = int(self.camera_index_var.get())
+                    self.camera.device_index = camera_index
+                except ValueError:
+                    messagebox.showerror("Error", "Invalid camera index")
+                    return
+
                 config = MotionConfig(port=port)
                 self.motion.cfg = config
                 self.motion.connect()
                 self.camera.open()
-                self._log(f"✓ Connected to {port} and opened camera")
+                self._log(f"✓ Connected to {port} and opened camera {camera_index}")
+                
+                # Start preview
+                self.preview_running = True
+                self._update_preview()
 
         except Exception as e:
             messagebox.showerror("Connection Error", f"Failed to connect: {e}")
@@ -203,6 +264,48 @@ class InspectionGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to release motor: {e}")
             self._log(f"✗ Release failed: {e}")
+
+    def _update_preview(self):
+        """Update camera preview display (runs continuously via after() callbacks)."""
+        if not self.preview_running or not self.camera.is_open:
+            return
+
+        try:
+            success, frame = self.camera.read_frame()
+            
+            if success and frame is not None:
+                # Convert BGR to RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                # Resize to fit preview area (approx 400x300)
+                height, width = frame_rgb.shape[:2]
+                max_width = 400
+                max_height = 300
+                
+                # Calculate scaling factor to maintain aspect ratio
+                scale = min(max_width / width, max_height / height)
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                
+                frame_resized = cv2.resize(frame_rgb, (new_width, new_height))
+                
+                # Convert to PhotoImage
+                img = Image.fromarray(frame_resized)
+                photo = ImageTk.PhotoImage(image=img)
+                
+                # Update label
+                self.preview_label.config(image=photo, text='')
+                self.preview_label.image = photo  # Keep reference to avoid GC
+            else:
+                # Show error message
+                self.preview_label.config(image='', text='No Camera Signal', fg='red')
+                
+        except Exception as e:
+            self.preview_label.config(image='', text=f'Preview Error: {e}', fg='red')
+        
+        # Schedule next update (~30 FPS)
+        if self.preview_running:
+            self.root.after(33, self._update_preview)
 
     def _start_inspection(self):
         """Start inspection run in background thread."""
@@ -284,6 +387,9 @@ class InspectionGUI:
                 return
             self.stop_flag.set()
 
+        # Stop preview
+        self.preview_running = False
+
         # Cleanup
         try:
             self.motion.close()
@@ -299,8 +405,8 @@ def main():
     # Create motion controller (not connected yet)
     motion = MotionController(cfg=MotionConfig(port=""))
 
-    # Create mock camera (not opened yet)
-    camera = MockCamera()
+    # Create USB-C camera (not opened yet)
+    camera = USBCCamera(device_index=0)
 
     # Create GUI
     root = tk.Tk()

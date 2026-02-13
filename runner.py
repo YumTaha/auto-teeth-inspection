@@ -78,8 +78,9 @@ def run_inspection(
         filename = f"tooth_{i:04d}_deg_{target_deg:.6f}.png"
         path = os.path.join(run_dir, filename)
 
+        emit(f"Capturing image {i}...")
         camera.capture_to(path)
-        emit(f"Saved: {filename}")
+        emit(f"✓ Saved: {filename}")
 
     emit("Run complete.")
     return run_dir
