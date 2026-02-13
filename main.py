@@ -36,7 +36,20 @@ class InspectionGUI:
 
         # Setup window
         self.root.title("Teeth Inspection System")
-        self.root.geometry("800x700")
+        
+        # Maximize window for full camera preview
+        try:
+            # Try to maximize window (works on most platforms)
+            self.root.state('zoomed')  # Linux/Windows
+        except:
+            try:
+                self.root.attributes('-zoomed', True)  # Alternative for some systems
+            except:
+                # Fallback: set to 90% of screen size
+                screen_width = self.root.winfo_screenwidth()
+                screen_height = self.root.winfo_screenheight()
+                self.root.geometry(f"{int(screen_width * 0.9)}x{int(screen_height * 0.9)}")
+        
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         self._build_ui()
@@ -297,10 +310,16 @@ class InspectionGUI:
                 # Convert BGR to RGB
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
-                # Resize to fit preview area (approx 400x300)
+                # Resize to fit preview area (dynamic based on window size)
                 height, width = frame_rgb.shape[:2]
-                max_width = 400
-                max_height = 300
+                
+                # Get available space in preview area
+                preview_width = self.preview_label.winfo_width()
+                preview_height = self.preview_label.winfo_height()
+                
+                # Use actual dimensions if available, otherwise use large defaults
+                max_width = preview_width if preview_width > 1 else 1200
+                max_height = preview_height if preview_height > 1 else 800
                 
                 # Calculate scaling factor to maintain aspect ratio
                 scale = min(max_width / width, max_height / height)
