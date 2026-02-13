@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 import time
+import threading
 
 
 class USBCCamera:
@@ -16,6 +17,7 @@ class USBCCamera:
     def __init__(self, device_index: int = 0):
         self.device_index = device_index
         self._cap: Optional[cv2.VideoCapture] = None
+        self._lock = threading.Lock()  # Prevent simultaneous access from preview and capture
 
     @property
     def is_open(self) -> bool:
@@ -42,24 +44,26 @@ class USBCCamera:
         if not self.is_open:
             raise RuntimeError("USB-C camera not open.")
 
-        # Flush buffer by reading a few frames to ensure we get a fresh capture
-        # This prevents capturing frames from when the motor was still moving
-        for _ in range(3):
-            self._cap.read()
-            time.sleep(0.05)  # Small delay between flushes
-        
-        # Now capture the actual frame
-        ret, frame = self._cap.read()
-        if not ret or frame is None:
-            raise RuntimeError("Failed to capture frame from USB-C camera.")
+        with self._lock:
+            # Flush buffer by reading more frames to ensure we get a fresh capture
+            # This prevents capturing frames from when the motor was still moving
+            # or frames that are being read by the preview loop
+            for _ in range(5):  # Increased from 3 to 5 for better buffer clearing
+                self._cap.read()
+                time.sleep(0.03)  # 30ms between flushes
+            
+            # Now capture the actual frame
+            ret, frame = self._cap.read()
+            if not ret or frame is None:
+                raise RuntimeError("Failed to capture frame from USB-C camera.")
 
-        # Save as PNG
-        success = cv2.imwrite(filepath, frame)
-        if not success:
-            raise RuntimeError(f"Failed to save image to {filepath}")
-        
-        # Small delay to ensure file write is complete
-        time.sleep(0.05)
+            # Save as PNG
+            success = cv2.imwrite(filepath, frame)
+            if not success:
+                raise RuntimeError(f"Failed to save image to {filepath}")
+            
+            # Small delay to ensure file write is complete
+            time.sleep(0.05)
 
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
         """
@@ -69,7 +73,8 @@ class USBCCamera:
         if not self.is_open:
             return False, None
 
-        return self._cap.read()
+        with self._lock:
+            return self._cap.read()
 
     def __enter__(self) -> "USBCCamera":
         self.open()
@@ -79,15 +84,32 @@ class USBCCamera:
         self.close()
 
     @staticmethod
-    def list_available_cameras(max_index: int = 10) -> list[int]:
+    def list_available_cameras(max_index: int = 5) -> list[int]:
         """
         Test camera indices 0 through max_index-1 and return list of working indices.
-        This can be slow as it attempts to open each camera briefly.
+        Stops early after 2 consecutive failures to reduce noise.
         """
+        # Suppress OpenCV warnings during detection
+        old_log_level = cv2.getLogLevel()
+        cv2.setLogLevel(cv2.LOG_LEVEL_ERROR)
+        
         available = []
-        for i in range(max_index):
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                available.append(i)
-                cap.release()
+        consecutive_failures = 0
+        
+        try:
+            for i in range(max_index):
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    available.append(i)
+                    consecutive_failures = 0
+                    cap.release()
+                else:
+                    consecutive_failures += 1
+                    # Stop after 2 consecutive failures to avoid noise
+                    if consecutive_failures >= 2:
+                        break
+        finally:
+            # Restore log level
+            cv2.setLogLevel(old_log_level)
+        
         return available

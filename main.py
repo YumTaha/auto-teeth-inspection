@@ -36,12 +36,32 @@ class InspectionGUI:
 
         # Setup window
         self.root.title("Teeth Inspection System")
-        self.root.geometry("1100x600")
+        self.root.geometry("800x700")
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
         self._build_ui()
+        self._center_window()
         self._populate_camera_list()
         self._update_button_states()
+
+    def _center_window(self):
+        """Center the window on screen."""
+        self.root.update_idletasks()
+        
+        # Get window size
+        window_width = self.root.winfo_width()
+        window_height = self.root.winfo_height()
+        
+        # Get screen size
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        
+        # Calculate position
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        
+        # Set position
+        self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
     def _build_ui(self):
         """Build the complete GUI layout."""
@@ -113,20 +133,20 @@ class InspectionGUI:
         self.exit_btn = ttk.Button(btn_row2, text="Exit", command=self._on_closing, width=15)
         self.exit_btn.pack(side=tk.LEFT, padx=5)
 
-        # ========== Camera Preview & Log Display (Side-by-Side) ==========
-        # Create a PanedWindow for resizable split
-        self.paned_window = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        # ========== Camera Preview & Log Display (Vertical Stack) ==========
+        # Create a PanedWindow for resizable vertical split
+        self.paned_window = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
         self.paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        # Left pane: Camera Preview
+        # Top pane: Camera Preview (Large)
         preview_frame = ttk.LabelFrame(self.paned_window, text="Camera Preview", padding=10)
-        self.preview_label = tk.Label(preview_frame, bg="black", width=50, height=20)
+        self.preview_label = tk.Label(preview_frame, bg="black")
         self.preview_label.pack(fill=tk.BOTH, expand=True)
-        self.paned_window.add(preview_frame, weight=1)
+        self.paned_window.add(preview_frame, weight=5)
 
-        # Right pane: Log Display
-        log_frame = ttk.LabelFrame(self.paned_window, text="Log", padding=10)
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=20, state=tk.DISABLED, wrap=tk.WORD)
+        # Bottom pane: Log Display (Compact - 4 lines)
+        log_frame = ttk.LabelFrame(self.paned_window, text="Log", padding=5)
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=4, state=tk.DISABLED, wrap=tk.WORD)
         self.log_text.pack(fill=tk.BOTH, expand=True)
         self.paned_window.add(log_frame, weight=1)
 
