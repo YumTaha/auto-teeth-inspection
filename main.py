@@ -11,7 +11,7 @@ import cv2
 from PIL import Image, ImageTk
 
 from motion import MotionController, MotionConfig
-from usbc_camera import USBCCamera
+from camera import BaslerCamera
 from runner import run_inspection, RunConfig
 
 
@@ -20,7 +20,7 @@ class InspectionGUI:
     GUI for teeth inspection system with motor control and camera capture.
     """
 
-    def __init__(self, root: tk.Tk, motion: MotionController, camera: USBCCamera):
+    def __init__(self, root: tk.Tk, motion: MotionController, camera: BaslerCamera):
         self.root = root
         self.motion = motion
         self.camera = camera
@@ -132,18 +132,9 @@ class InspectionGUI:
 
     def _populate_camera_list(self):
         """Populate the camera index dropdown with available cameras."""
-        try:
-            available = USBCCamera.list_available_cameras(max_index=10)
-            if available:
-                self.camera_index_combo['values'] = [str(i) for i in available]
-                self.camera_index_var.set(str(available[0]))
-            else:
-                self.camera_index_combo['values'] = ['0']
-                self.camera_index_var.set('0')
-        except Exception as e:
-            self._log(f"⚠ Could not detect cameras: {e}")
-            self.camera_index_combo['values'] = ['0']
-            self.camera_index_var.set('0')
+        # Basler camera auto-detects, no manual selection needed
+        self.camera_index_combo['values'] = ['Auto']
+        self.camera_index_var.set('Auto')
 
     def _browse_directory(self):
         """Open directory browser dialog."""
@@ -217,18 +208,14 @@ class InspectionGUI:
                     return
 
                 # Update camera device index from dropdown
-                try:
-                    camera_index = int(self.camera_index_var.get())
-                    self.camera.device_index = camera_index
-                except ValueError:
-                    messagebox.showerror("Error", "Invalid camera index")
-                    return
+                # Basler camera auto-detects
+                pass
 
                 config = MotionConfig(port=port)
                 self.motion.cfg = config
                 self.motion.connect()
                 self.camera.open()
-                self._log(f"✓ Connected to {port} and opened camera {camera_index}")
+                self._log(f"✓ Connected to {port} and opened Basler camera")
                 
                 # Start preview
                 self.preview_running = True
@@ -270,42 +257,12 @@ class InspectionGUI:
         if not self.preview_running or not self.camera.is_open:
             return
 
-        try:
-            success, frame = self.camera.read_frame()
-            
-            if success and frame is not None:
-                # Convert BGR to RGB
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                # Resize to fit preview area (approx 400x300)
-                height, width = frame_rgb.shape[:2]
-                max_width = 400
-                max_height = 300
-                
-                # Calculate scaling factor to maintain aspect ratio
-                scale = min(max_width / width, max_height / height)
-                new_width = int(width * scale)
-                new_height = int(height * scale)
-                
-                frame_resized = cv2.resize(frame_rgb, (new_width, new_height))
-                
-                # Convert to PhotoImage
-                img = Image.fromarray(frame_resized)
-                photo = ImageTk.PhotoImage(image=img)
-                
-                # Update label
-                self.preview_label.config(image=photo, text='')
-                self.preview_label.image = photo  # Keep reference to avoid GC
-            else:
-                # Show error message
-                self.preview_label.config(image='', text='No Camera Signal', fg='red')
-                
-        except Exception as e:
-            self.preview_label.config(image='', text=f'Preview Error: {e}', fg='red')
+        # Basler camera doesn't provide read_frame() - show placeholder
+        self.preview_label.config(image='', text='Basler Camera Active\n(No Live Preview)', fg='cyan')
         
-        # Schedule next update (~30 FPS)
+        # Keep preview loop running
         if self.preview_running:
-            self.root.after(33, self._update_preview)
+            self.root.after(1000, self._update_preview)  # Update every second
 
     def _start_inspection(self):
         """Start inspection run in background thread."""
@@ -405,8 +362,8 @@ def main():
     # Create motion controller (not connected yet)
     motion = MotionController(cfg=MotionConfig(port=""))
 
-    # Create USB-C camera (not opened yet)
-    camera = USBCCamera(device_index=0)
+    # Create Basler camera (not opened yet)
+    camera = BaslerCamera()
 
     # Create GUI
     root = tk.Tk()
