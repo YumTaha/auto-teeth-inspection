@@ -59,6 +59,9 @@ class InspectionGUI:
         self._center_window()
         self._populate_camera_list()
         self._update_button_states()
+        
+        # Auto-focus QR Scan field
+        self.qr_entry.focus_set()
 
     def _center_window(self):
         """Center the window on screen."""
@@ -98,33 +101,27 @@ class InspectionGUI:
         self.teeth_entry = ttk.Entry(config_frame, textvariable=self.teeth_var, width=20)
         self.teeth_entry.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
 
-        # Captures
-        ttk.Label(config_frame, text="Captures:").grid(row=2, column=0, sticky=tk.W, pady=2)
-        self.captures_var = tk.StringVar(value="72")
-        self.captures_entry = ttk.Entry(config_frame, textvariable=self.captures_var, width=20)
-        self.captures_entry.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
-
         # Output Directory
-        ttk.Label(config_frame, text="Output Dir:").grid(row=3, column=0, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="Output Dir:").grid(row=2, column=0, sticky=tk.W, pady=2)
         self.outdir_var = tk.StringVar(value="./captures")
         self.outdir_entry = ttk.Entry(config_frame, textvariable=self.outdir_var, width=20)
-        self.outdir_entry.grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
+        self.outdir_entry.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
         
         self.browse_btn = ttk.Button(config_frame, text="Browse...", command=self._browse_directory)
-        self.browse_btn.grid(row=3, column=2, padx=5, pady=2)
+        self.browse_btn.grid(row=2, column=2, padx=5, pady=2)
 
         # Camera Index
-        ttk.Label(config_frame, text="Camera Index:").grid(row=4, column=0, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="Camera Index:").grid(row=3, column=0, sticky=tk.W, pady=2)
         self.camera_index_var = tk.StringVar(value="0")
         self.camera_index_combo = ttk.Combobox(config_frame, textvariable=self.camera_index_var, width=18, state="readonly")
-        self.camera_index_combo.grid(row=4, column=1, sticky=tk.W, padx=5, pady=2)
+        self.camera_index_combo.grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
 
         # QR Scan
-        ttk.Label(config_frame, text="QR Scan:").grid(row=5, column=0, sticky=tk.W, pady=2)
+        ttk.Label(config_frame, text="QR Scan:").grid(row=4, column=0, sticky=tk.W, pady=2)
         self.qr_var = tk.StringVar(value="")
         self.qr_entry = ttk.Entry(config_frame, textvariable=self.qr_var, width=20)
-        self.qr_entry.grid(row=5, column=1, sticky=tk.W, padx=5, pady=2)
-        ttk.Label(config_frame, text="(scan then press Enter)", foreground="gray").grid(row=5, column=2, sticky=tk.W, padx=5, pady=2)
+        self.qr_entry.grid(row=4, column=1, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(config_frame, text="(scan then press Enter)", foreground="gray").grid(row=4, column=2, sticky=tk.W, padx=5, pady=2)
         self.qr_entry.bind("<Return>", self._on_qr_scanned)
 
         # ========== Control Buttons Frame ==========
@@ -265,7 +262,6 @@ class InspectionGUI:
         state_config = tk.NORMAL if not running else tk.DISABLED
         self.port_entry.config(state=state_config)
         self.teeth_entry.config(state=state_config)
-        self.captures_entry.config(state=state_config)
         self.outdir_entry.config(state=state_config)
         self.browse_btn.config(state=state_config)
         
@@ -447,14 +443,11 @@ class InspectionGUI:
         try:
             # Validate inputs
             teeth = int(self.teeth_var.get())
-            captures = int(self.captures_var.get())
+            captures = teeth  # Capture all teeth
             outdir = self.outdir_var.get().strip()
 
             if teeth <= 0:
                 messagebox.showerror("Error", "Teeth count must be > 0")
-                return
-            if captures <= 0:
-                messagebox.showerror("Error", "Captures must be > 0")
                 return
             if not outdir:
                 messagebox.showerror("Error", "Please specify output directory")
