@@ -483,16 +483,18 @@ class InspectionGUI:
             observation_id = None
             api_config = None
             
-            if self.test_case_id is not None and self.cut_number is not None:
+            if self.test_case_id is not None:
                 try:
                     api_config = api_config_from_env()
                     client = ApiClient(api_config)
                     
-                    # Determine scope: "incoming" if this is the first cut (cut_number=0), otherwise "cut"
-                    scope = "incoming" if self.cut_number == 0 else "cut"
+                    # Determine scope: "incoming" if cut_number is 0 or None, otherwise "cut"
+                    # Treat None as 0 for the API (incoming inspection)
+                    cut_num = self.cut_number if self.cut_number is not None else 0
+                    scope = "incoming" if (self.cut_number is None or self.cut_number == 0) else "cut"
                     
-                    self._log(f"Creating observation for test case {self.test_case_id} (scope: {scope})...")
-                    obs_response = client.create_observation(self.test_case_id, self.cut_number, scope=scope)
+                    self._log(f"Creating observation for test case {self.test_case_id} (scope: {scope}, cut: {cut_num})...")
+                    obs_response = client.create_observation(self.test_case_id, cut_num, scope=scope)
                     
                     # Validate response
                     if obs_response is None:
