@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from kinematics import index_to_angle_deg
+from api_client import ApiClient
 
 
 @dataclass
@@ -16,6 +18,8 @@ class RunConfig:
     outdir: str
     done_timeout_s: float = 15.0
     make_run_subfolder: bool = True
+    observation_id: Optional[int] = None
+    api_config: Optional[Any] = None
 
 
 # optional callback signature for UI/logging
@@ -78,12 +82,32 @@ def run_inspection(
             emit(f"WAIT DONE failed (timeout/stop) at index {i}.")
             break
 
-        filename = f"tooth_{i:04d}_deg_{target_deg:.6f}.png"
+        tooth_num = i + 1  # Tooth numbering starts at 1
+        filename = f"tooth_{tooth_num:04d}_deg_{target_deg:.6f}.png"
         path = os.path.join(run_dir, filename)
 
         emit(f"Capturing image {i}...")
         camera.capture_to(path)
         emit(f"✓ Saved: {filename}")
+        
+        # Upload to observation if configured (non-blocking)
+        if cfg.observation_id is not None and cfg.api_config is not None:
+            def upload_worker(obs_id, api_cfg, file_path, tooth_number):
+                """Background worker to upload image without blocking."""
+                try:
+                    client = ApiClient(api_cfg)
+                    client.upload_attachment(obs_id, file_path, tag=tooth_number)
+                    emit(f"✓ Uploaded tooth_{tooth_number} to observation")
+                except Exception as e:
+                    emit(f"⚠ Upload failed for tooth_{tooth_number}: {e}")
+            
+            # Start upload in background thread
+            upload_thread = threading.Thread(
+                target=upload_worker,
+                args=(cfg.observation_id, cfg.api_config, path, tooth_num),
+                daemon=True
+            )
+            upload_thread.start()
         
         # Show the captured image in preview
         if on_image_captured:

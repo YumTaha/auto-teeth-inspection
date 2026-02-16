@@ -15,7 +15,13 @@ from PIL import Image, ImageTk
 from motion import MotionController, MotionConfig
 from usbc_camera import USBCCamera
 from runner import run_inspection, RunConfig
-from api_client import ApiClient, api_config_from_env, extract_teeth_from_context
+from api_client import (
+    ApiClient, 
+    api_config_from_env, 
+    extract_teeth_from_context,
+    extract_test_case_id_from_context,
+    extract_cut_number_from_context
+)
 
 
 class InspectionGUI:
@@ -36,6 +42,12 @@ class InspectionGUI:
         # Preview
         self.preview_running = False
         self.preview_label: Optional[tk.Label] = None
+
+        # API / Test Case tracking
+        self.sample_context: Optional[dict] = None
+        self.test_case_id: Optional[int] = None
+        self.cut_number: Optional[int] = None
+        self.observation_id: Optional[int] = None
 
         # Setup window
         self.root.title("Teeth Inspection System")
@@ -212,11 +224,25 @@ class InspectionGUI:
                 self._log(f"Fetching sample context for: {identifier}")
                 context = client.get_sample_context(identifier)
                 teeth = extract_teeth_from_context(context)
+                test_case_id = extract_test_case_id_from_context(context)
+                cut_number = extract_cut_number_from_context(context)
                 
                 # Update GUI on main thread
                 def update_gui():
+                    # Store context data
+                    self.sample_context = context
+                    self.test_case_id = test_case_id
+                    self.cut_number = cut_number
+                    
+                    # Update teeth count
                     self.teeth_var.set(str(teeth))
                     self._log(f"Auto-populated Teeth Count: {teeth}")
+                    
+                    # Warn if no active test case
+                    if test_case_id is None:
+                        self._log("⚠ Warning: No active test case found - inspection will run locally without API upload")
+                    else:
+                        self._log(f"✓ Test Case ID: {test_case_id}, Cut Number: {cut_number}")
                 
                 self.root.after(0, update_gui)
                 
@@ -453,6 +479,35 @@ class InspectionGUI:
                 messagebox.showerror("Error", "Please specify output directory")
                 return
 
+            # Create observation if test case is available
+            observation_id = None
+            api_config = None
+            
+            if self.test_case_id is not None and self.cut_number is not None:
+                try:
+                    api_config = api_config_from_env()
+                    client = ApiClient(api_config)
+                    self._log(f"Creating observation for test case {self.test_case_id}...")
+                    obs_response = client.create_observation(self.test_case_id, self.cut_number)
+                    
+                    # Validate response
+                    if obs_response is None:
+                        raise ValueError("API returned None response")
+                    if not isinstance(obs_response, dict):
+                        raise ValueError(f"API returned unexpected type: {type(obs_response)}")
+                    
+                    observation_id = obs_response.get("id")
+                    if observation_id is None:
+                        raise ValueError(f"No 'id' in observation response: {obs_response}")
+                    
+                    self.observation_id = observation_id
+                    self._log(f"✓ Created observation ID: {observation_id}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to create observation: {e}")
+                    return
+            else:
+                self._log("⚠ No test case - running inspection locally without API upload")
+
             # Set up run
             self.is_running = True
             self.stop_flag.clear()
@@ -467,7 +522,9 @@ class InspectionGUI:
                 captures=captures,
                 outdir=outdir,
                 done_timeout_s=15.0,
-                make_run_subfolder=True
+                make_run_subfolder=True,
+                observation_id=observation_id,
+                api_config=api_config
             )
 
             self._log("=" * 60)
