@@ -20,6 +20,7 @@ class RunConfig:
 
 # optional callback signature for UI/logging
 EventCb = Optional[Callable[[str], None]]
+ImageCb = Optional[Callable[[str], None]]  # Callback for displaying captured images
 
 
 def run_inspection(
@@ -28,11 +29,13 @@ def run_inspection(
     camera,
     stop_flag=None,
     on_event: EventCb = None,
+    on_image_captured: ImageCb = None,
 ) -> str:
     """
     Returns the folder where images were saved.
     motion must provide: hold(), move_abs(deg), wait_done(timeout_s, stop_flag=...)
     camera must provide: capture_to(filepath)
+    on_image_captured: optional callback called with filepath after each capture
     """
 
     def emit(msg: str):
@@ -81,6 +84,10 @@ def run_inspection(
         emit(f"Capturing image {i}...")
         camera.capture_to(path)
         emit(f"✓ Saved: {filename}")
+        
+        # Show the captured image in preview
+        if on_image_captured:
+            on_image_captured(path)
 
     emit("Run complete.")
     return run_dir

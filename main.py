@@ -8,6 +8,7 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 from typing import Optional
 
 import cv2
+import numpy as np
 from PIL import Image, ImageTk
 
 from motion import MotionController, MotionConfig
@@ -336,6 +337,51 @@ class InspectionGUI:
         if self.preview_running:
             self.root.after(33, self._update_preview)
 
+    def _display_captured_image(self, filepath: str):
+        """Display a captured image in the preview (thread-safe)."""
+        def update():
+            try:
+                # Load the captured image
+                img = Image.open(filepath)
+                img_array = np.array(img)
+                
+                # Convert BGR to RGB if needed
+                if len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                    img_rgb = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
+                else:
+                    img_rgb = img_array
+                
+                # Resize to fit preview area
+                height, width = img_rgb.shape[:2]
+                preview_width = self.preview_label.winfo_width()
+                preview_height = self.preview_label.winfo_height()
+                
+                max_width = preview_width if preview_width > 100 else 1000
+                max_height = preview_height if preview_height > 100 else 800
+                
+                scale = min(max_width / width, max_height / height)
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                
+                if new_width < 400:
+                    new_width = min(800, width)
+                    new_height = int(height * (new_width / width))
+                
+                img_resized = cv2.resize(img_rgb, (new_width, new_height))
+                
+                # Convert to PhotoImage
+                img_pil = Image.fromarray(img_resized)
+                photo = ImageTk.PhotoImage(image=img_pil)
+                
+                # Update label
+                self.preview_label.config(image=photo, text='')
+                self.preview_label.image = photo
+            except Exception as e:
+                self._log(f"Failed to display image: {e}")
+        
+        # Schedule update on main thread
+        self.root.after(0, update)
+
     def _start_inspection(self):
         """Start inspection run in background thread."""
         try:
@@ -357,6 +403,10 @@ class InspectionGUI:
             # Set up run
             self.is_running = True
             self.stop_flag.clear()
+            
+            # Pause live preview during inspection
+            self.preview_running = False
+            
             self._update_button_states()
 
             config = RunConfig(
@@ -392,7 +442,8 @@ class InspectionGUI:
                 motion=self.motion,
                 camera=self.camera,
                 stop_flag=self.stop_flag,
-                on_event=self._log
+                on_event=self._log,
+                on_image_captured=self._display_captured_image
             )
             self._log("=" * 60)
             self._log(f"✓ Inspection complete: {result_dir}")
@@ -402,6 +453,10 @@ class InspectionGUI:
             messagebox.showerror("Inspection Error", f"Failed: {e}")
         finally:
             self.is_running = False
+            # Resume live preview
+            if self.camera.is_open:
+                self.preview_running = True
+                self.root.after(0, self._update_preview)
             self.root.after(0, self._update_button_states)
 
     def _stop_inspection(self):
