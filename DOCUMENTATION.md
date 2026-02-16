@@ -13,61 +13,85 @@ The Auto Teeth Inspection System is a Python-based application designed for auto
 │                                                               │
 │  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐       │
 │  │  Config UI  │  │  Controls UI │  │  Preview UI  │       │
+│  │  + QR Scan  │  │              │  │              │       │
 │  └─────────────┘  └──────────────┘  └──────────────┘       │
 └─────────────────────────────────────────────────────────────┘
          │                    │                    │
-         ├────────────────────┼────────────────────┤
-         │                    │                    │
-    ┌────▼─────┐       ┌─────▼──────┐      ┌─────▼──────┐
-    │ motion.py│       │runner.py   │      │usbc_camera │
-    │          │       │            │      │   .py      │
-    │ Arduino  │       │ Inspection │      │            │
-    │ Control  │       │   Logic    │      │  Camera    │
-    └────┬─────┘       └─────┬──────┘      └─────┬──────┘
-         │                    │                    │
-    ┌────▼─────┐       ┌─────▼──────┐      ┌─────▼──────┐
-    │ Arduino  │       │kinematics  │      │  OpenCV /  │
-    │ via      │       │    .py     │      │  Physical  │
-    │ Serial   │       │            │      │   Camera   │
-    │USB/COM   │       │ Angle Math │      └────────────┘
-    └──────────┘       └────────────┘
+         ├────────────────────┼────────────────────┼────────────┐
+         │                    │                    │            │
+    ┌────▼─────┐       ┌─────▼──────┐      ┌─────▼──────┐ ┌──▼────────┐
+    │ motion.py│       │runner.py   │      │usbc_camera │ │api_client │
+    │          │       │            │      │   .py      │ │   .py     │
+    │ Arduino  │       │ Inspection │      │            │ │           │
+    │ Control  │       │   Logic    │      │  Camera    │ │  Sample   │
+    │          │       │            │      │            │ │  Context  │
+    │          │       │ Background │      │            │ │  Observe  │
+    │          │       │  Uploads   │      │            │ │  Upload   │
+    └────┬─────┘       └─────┬──────┘      └─────┬──────┘ └──┬────────┘
+         │                    │                    │            │
+    ┌────▼─────┐       ┌─────▼──────┐      ┌─────▼──────┐ ┌──▼────────┐
+    │ Arduino  │       │kinematics  │      │  OpenCV /  │ │ M.K.Morse │
+    │ via      │       │    .py     │      │  Physical  │ │  Testing  │
+    │ Serial   │       │            │      │   Camera   │ │    API    │
+    │USB/COM   │       │ Angle Math │      └────────────┘ │  (HTTPS)  │
+    └──────────┘       └────────────┘                      └───────────┘
 ```
 
 ## File Descriptions
 
 ### **main.py** - GUI Application & Main Controller
 
-**Purpose**: The main entry point and GUI application that orchestrates all system components.
+**Purpose**: The main entry point and GUI application that orchestrates all system components including API integration.
 
 **Key Components**:
 - `InspectionGUI` class: Main application window and controller
-  - Configuration panel (COM port, teeth count, captures, output directory, camera index)
+  - Configuration panel (COM port, QR scan, teeth count, output directory, camera index)
+  - QR Scan field with auto-focus for immediate scanning
   - Control buttons (Connect, Hold Motor, Release Motor, Start Inspection, Stop, Exit)
   - Camera preview display with live feed or captured image flash
   - Button state management based on system state
+  - API integration for observation creation and image upload
 
 **Key Features**:
 - Tkinter-based GUI with maximized window
+- **QR Code Scanning**: Auto-focused field for USB scanner input
+  - Parses JSON QR codes to extract sample identifier
+  - Fetches sample context from API in background thread
+  - Auto-populates teeth count
+  - Stores test case ID and cut number for observation creation
+- **API Integration**:
+  - Creates observation on active test case when inspection starts
+  - Passes observation ID to runner for image uploads
+  - Handles cases with no active test case (local-only mode)
 - Live camera preview at 2560x1920 resolution (~30 FPS when possible)
 - During inspection: pauses live preview and flashes each captured image
 - Thread-safe operations using `threading.Event` for stop signals
 - Automatic button state management (enable/disable based on connection and running states)
 
 **Key Methods**:
+- `_on_qr_scanned()`: Handle QR code scan, fetch sample context, extract data
 - `_toggle_connection()`: Connect/disconnect to Arduino motion controller
 - `_hold_motor()`: Enable motor and zero position
 - `_release_motor()`: Disable motor
-- `_start_inspection()`: Validate inputs and start inspection in background thread
+- `_start_inspection()`: Create observation, validate inputs, start inspection in background thread
 - `_update_preview()`: Continuous camera preview update loop
 - `_display_captured_image()`: Flash captured images during inspection
 - `_run_inspection_worker()`: Background thread that runs the inspection sequence
 
+**API Instance Variables**:
+- `sample_context`: Full sample context from API
+- `test_case_id`: Active test case ID (None if no active test)
+- `cut_number`: Total cuts from active test case
+- `observation_id`: Created observation ID
+
 **Dependencies**:
 - `motion.py`: For Arduino motion controller communication
 - `usbc_camera.py`: For camera capture and preview
-- `runner.py`: For inspection sequence execution
+- `runner.py`: For inspection sequence execution with background uploads
+- `api_client.py`: For QR scanning, observation creation, image upload
 - `tkinter`: GUI framework
 - `PIL`, `cv2`, `numpy`: Image processing
+- `json`: QR code parsing
 
 ---
 
@@ -163,22 +187,95 @@ Responses (from Arduino):
 - Color format: BGR (OpenCV standard)
 
 ---
+---
+
+### **api_client.py** - API Client for M.K. Morse Testing System
+
+**Purpose**: Provides interface to M.K. Morse testing API for sample context retrieval, observation creation, and image upload.
+
+**Key Components**:
+- `ApiConfig` dataclass: API configuration
+  - `base_url`: API base URL (default: `https://eng-ubuntu.mkmorse.local/api`)
+  
+- `ApiClient` class: Main API interface
+  - Handles HTTPS connections with self-signed certificates
+  - JSON request/response handling
+  - Comprehensive request/response logging
+
+**Key Methods**:
+- `get_sample_context(identifier)`: Fetch sample context from API
+  - Endpoint: `GET /samples/identifier/{identifier}/context`
+  - Returns sample data including teeth count, active test case, cut number
+  
+- `create_observation(test_case_id, cut_number)`: Create observation on test case
+  - Endpoint: `POST /test-cases/{test_case_id}/observations`
+  - Payload: `observation_type_id=1`, `scope="cut"`, `cut_number`
+  - Returns observation ID for image uploads
+  
+- `upload_attachment(observation_id, file_path, tag)`: Upload image to observation
+  - Endpoint: `POST /observations/{observation_id}/upload`
+  - Multipart form upload with file and tooth number tag
+  - Returns attachment metadata
+
+**Helper Functions**:
+- `extract_teeth_from_context(ctx)`: Extract teeth count from sample context
+- `extract_test_case_id_from_context(ctx)`: Extract active test case ID (or None)
+- `extract_cut_number_from_context(ctx)`: Extract cut number from test case
+- `api_config_from_env()`: Load API config from environment variables
+
+**API Logging**:
+All API calls log detailed information to console:
+- Request URL, headers, payload
+- Response status, headers, content
+- Parsed JSON responses
+- Helpful for debugging API issues
+
+**SSL Configuration**:
+- Disables SSL verification for self-signed certificates
+- Suppresses urllib3 InsecureRequestWarning
+- Uses HTTPS by default
+
+**Environment Variables**:
+```powershell
+$env:MKMORSE_API_BASE_URL = "https://eng-ubuntu.mkmorse.local/api"  # Optional
+```
+
+**Sample Context Response**:
+```json
+{
+  "sample": {
+    "design": {
+      "attribute_values": {
+        "Number of Teeth": 60
+      }
+    }
+  },
+  "active_test_case": {
+    "id": 8,
+    "total_cuts": 1400
+  }
+}
+```
+
+---
 
 ### **runner.py** - Inspection Sequence Logic
 
-**Purpose**: Orchestrates the automated inspection sequence - moving the motor and capturing images at each position.
+**Purpose**: Orchestrates the automated inspection sequence - moving the motor, capturing images, and uploading to API.
 
 **Key Components**:
 - `RunConfig` dataclass: Inspection configuration
   - `teeth`: Number of teeth on the gear
-  - `captures`: Number of images to capture
+  - `captures`: Number of images to capture (typically matches teeth)
   - `outdir`: Output directory for images
   - `done_timeout_s`: Timeout for each motor movement (default 15.0s)
   - `make_run_subfolder`: Create timestamped subfolder (default True)
+  - `observation_id`: Optional observation ID for API uploads
+  - `api_config`: Optional API config for uploads
 
 - `run_inspection()` function: Main inspection loop
   - Takes motion controller, camera, and callbacks
-  - Executes full inspection sequence
+  - Executes full inspection sequence with non-blocking uploads
   - Returns directory where images were saved
 
 **Inspection Sequence**:
@@ -188,32 +285,42 @@ Responses (from Arduino):
    - Calculate target angle using kinematics
    - Send move command to motor
    - Wait for "DONE" signal (with timeout and stop flag check)
-   - Capture image to file
+   - Capture image to file with tooth number (1-based)
+   - **Start background upload thread** (if observation_id provided)
    - Call `on_image_captured` callback (for GUI preview)
+   - Continue to next tooth immediately (non-blocking)
    - Log progress
 4. Complete and return output directory
+5. Upload threads continue running in background
+
+**Background Upload**:
+- Each image upload runs in a separate daemon thread
+- Upload failures don't stop inspection
+- Upload success/failure logged to console
+- Multiple uploads can run simultaneously
+- Inspection runs at full speed regardless of upload time
 
 **Callbacks**:
-- `on_event`: Called with log messages (e.g., "Move 0/59: 0.000000 deg")
+- `on_event`: Called with log messages (e.g., "Move 0/59: 0.000000 deg", "✓ Uploaded tooth_1 to observation")
 - `on_image_captured`: Called with filepath after each capture (for GUI display)
 
 **File Naming Convention**:
 ```
-tooth_<index>_deg_<angle>.png
+tooth_<number>_deg_<angle>.png
 
-Examples:
-tooth_0000_deg_0.000000.png
-tooth_0001_deg_5.000000.png
-tooth_0059_deg_295.000000.png
+Examples (tooth numbering starts at 1):
+tooth_0001_deg_0.000000.png
+tooth_0002_deg_5.000000.png
+tooth_0060_deg_295.000000.png
 ```
 
 **Output Directory Structure**:
 ```
 ./captures/
 ├── run_20260216_143025/
-│   ├── tooth_0000_deg_0.000000.png
-│   ├── tooth_0001_deg_5.000000.png
-│   ├── tooth_0002_deg_10.000000.png
+│   ├── tooth_0001_deg_0.000000.png
+│   ├── tooth_0002_deg_5.000000.png
+│   ├── tooth_0003_deg_10.000000.png
 │   └── ...
 └── run_20260216_144532/
     └── ...
@@ -264,9 +371,31 @@ for i in range(captures):
 3. System detects available cameras (shows DirectShow warnings for non-existent indices)
 4. Camera dropdown populated with available cameras
 5. Default configuration loaded (COM port, teeth count, etc.)
+6. QR Scan field automatically focused for immediate scanning
 ```
 
-### 2. **Connection**
+### 2. **QR Code Scanning (Optional)**
+```
+1. User positions cursor in QR Scan field (auto-focused)
+2. User scans sample QR code with USB scanner
+   - QR code format: {"type":"sample","identifier":"TEST_60"}
+3. User presses Enter (or scanner auto-enters)
+4. System parses JSON to extract identifier
+5. Background thread fetches sample context from API:
+   - GET /samples/identifier/{identifier}/context
+6. System extracts data from context:
+   - Teeth count from sample.design.attribute_values["Number of Teeth"]
+   - Test case ID from active_test_case.id
+   - Cut number from active_test_case.total_cuts
+7. GUI updates:
+   - Teeth Count field auto-populated
+   - Log shows test case ID and cut number
+   - Warning shown if no active test case
+8. QR Scan field clears for next scan
+9. Status: Ready for inspection with API integration
+```
+
+### 3. **Connection**
 ```
 1. User enters COM port (e.g., COM9)
 2. User clicks "Connect"
@@ -276,7 +405,7 @@ for i in range(captures):
 6. Status: Connected (button changes to "Disconnect")
 ```
 
-### 3. **Motor Setup**
+### 4. **Motor Setup**
 ```
 1. User clicks "Hold Motor"
 2. System sends "H\n" command (enable motor)
@@ -285,7 +414,7 @@ for i in range(captures):
 5. Status: Motor enabled and zeroed
 ```
 
-### 4. **Camera Preview**
+### 5. **Camera Preview**
 ```
 1. User selects camera index from dropdown
 2. User clicks "Connect" (if not already connected)
@@ -296,31 +425,44 @@ for i in range(captures):
 7. Status: Live preview running
 ```
 
-### 5. **Inspection Run**
+### 6. **Inspection Run**
 ```
-1. User sets configuration:
-   - Teeth count: 72
-   - Captures: 72
+1. User sets configuration (or auto-populated from QR scan):
+   - Teeth count: 60  (from QR scan or manual entry)
    - Output dir: ./captures
+   - Captures matches teeth count automatically
    
 2. User clicks "Start Inspection"
 3. System validates inputs
-4. Live preview pauses
-5. Creates timestamped output folder
-6. For each of 72 captures:
-   a. Calculate angle: 0°, 5°, 10°, ... 355°
-   b. Send move command: "M5.000000\n"
+4. If test case ID exists from QR scan:
+   a. Create observation on test case via API:
+      - POST /test-cases/{test_case_id}/observations
+      - Payload: observation_type_id=1, scope="cut", cut_number
+   b. Store observation ID for uploads
+   c. Log: "✓ Created observation ID: 123"
+5. If no test case: Log warning "Running locally without API upload"
+6. Live preview pauses
+7. Creates timestamped output folder
+8. For each of 60 captures (teeth):
+   a. Calculate angle: 0°, 6°, 12°, ... 354°
+   b. Send move command: "M6.000000\n"
    c. Wait for "DONE" response (max 15s)
-   d. Flush camera buffer (3 frames)
-   e. Capture image to PNG
-   f. Flash image in preview
-   g. Log progress to console
-7. Inspection complete
-8. Live preview resumes
-9. Status: Inspection complete
+   d. Flush camera buffer (3 frames, 90ms total)
+   e. Capture image to PNG (tooth_0001, tooth_0002, ...)
+   f. Start background upload thread (non-blocking):
+      - POST /observations/{observation_id}/upload
+      - Multipart: file + tag (tooth number 1-based)
+      - Log: "✓ Uploaded tooth_1 to observation" (async)
+   g. Flash image in preview immediately
+   h. Continue to next tooth without waiting for upload
+   i. Log progress to console
+9. Inspection complete (uploads continue in background)
+10. Live preview resumes
+11. Background upload threads finish
+12. Status: Inspection complete, all images uploaded
 ```
 
-### 6. **Shutdown**
+### 7. **Shutdown**
 ```
 1. User clicks "Exit" or closes window
 2. Live preview stops
@@ -385,6 +527,43 @@ for i in range(captures):
   - Easier debugging and log capture
 - **Trade-off**: Users must run from terminal to see logs
 
+### 7. **Non-Blocking Background Uploads**
+- **Decision**: Upload images in separate daemon threads while inspection continues
+- **Rationale**:
+  - Inspection runs at full speed regardless of network conditions
+  - No delay between captures waiting for uploads
+  - Upload failures don't stop inspection
+  - Multiple uploads can run simultaneously
+- **Implementation**: Each upload spawns a daemon thread with upload_worker function
+- **Trade-off**: Upload completion is asynchronous (check console logs for status)
+
+### 8. **QR Code JSON Parsing**
+- **Decision**: Parse QR codes as JSON to extract identifier field
+- **Rationale**:
+  - QR codes contain structured data: {"type":"sample","identifier":"TEST_60"}
+  - Supports future QR code formats
+  - Falls back to raw string if not valid JSON
+  - Explicit field extraction prevents errors
+- **Implementation**: Try JSON parse, fallback to raw string on error
+
+### 9. **Tooth Numbering Starts at 1**
+- **Decision**: File names and API tags use 1-based numbering (tooth_0001, tooth_0002, ...)
+- **Rationale**:
+  - More intuitive for users (first tooth is #1, not #0)
+  - Matches industry convention
+  - Easier visual identification
+  - API tags align with user expectations
+- **Implementation**: `tooth_num = i + 1` where i is loop index (0-based)
+
+### 10. **Auto-Focus QR Scan Field**
+- **Decision**: QR Scan field receives focus automatically on startup
+- **Rationale**:
+  - Most common workflow starts with QR scan
+  - Allows immediate scanning without clicking
+  - USB scanners type and auto-enter
+  - Reduces user interaction steps
+- **Implementation**: `qr_entry.focus_set()` after GUI build
+
 ---
 
 ## Configuration Reference
@@ -397,8 +576,8 @@ BAUD_RATE = 115200
 CONNECT_DELAY = 2.0            # Arduino reset delay
 
 # Inspection
-TEETH_COUNT = 72               # Number of gear teeth
-CAPTURES = 72                  # Number of images (typically matches teeth)
+TEETH_COUNT = 72               # Number of gear teeth (auto-populated from QR)
+CAPTURES = TEETH_COUNT         # Matches teeth count automatically
 OUTPUT_DIR = "./captures"
 DONE_TIMEOUT = 15.0            # Max wait time per movement
 MAKE_SUBFOLDER = True          # Create timestamped run folders
@@ -406,6 +585,12 @@ MAKE_SUBFOLDER = True          # Create timestamped run folders
 # Camera
 CAMERA_INDEX = 1               # 0, 1, 2, ... (check dropdown)
 RESOLUTION = 2560x1920         # Single resolution for preview and capture
+
+# API Integration
+API_BASE_URL = "https://eng-ubuntu.mkmorse.local/api"  # Default
+API_TIMEOUT = 10               # Seconds for API requests
+API_UPLOAD_TIMEOUT = 30        # Seconds for image uploads
+SSL_VERIFY = False             # Disable for self-signed certs
 
 # Preview
 PREVIEW_FPS = 30               # Target frame rate
@@ -419,13 +604,16 @@ Project Root/
 ├── motion.py                  # Motion controller
 ├── usbc_camera.py             # Camera interface
 ├── runner.py                  # Inspection logic
+├── api_client.py              # API integration with M.K. Morse system
 ├── kinematics.py              # Angle calculations
 ├── requirements.txt           # Python dependencies
 ├── README.md                  # User guide
 ├── DOCUMENTATION.md           # This file
 └── captures/                  # Output directory (created automatically)
     └── run_YYYYMMDD_HHMMSS/   # Timestamped run folders
-        └── tooth_*.png        # Captured images
+        └── tooth_0001.png     # Captured images (1-based numbering)
+        └── tooth_0002.png
+        └── ...
 ```
 
 ---
@@ -490,6 +678,38 @@ Failed to open camera at index 1
 - **Cause**: Wrong camera index, camera in use by another program
 - **Solution**: Try different camera index, close other camera applications
 
+**5. QR Scan - No Active Test Case**
+```
+[WARNING] No active test case found. Inspection will run locally without creating observation.
+```
+- **Cause**: QR code sample has no active test case in the API
+- **Impact**: Inspection runs normally, images saved locally, but not uploaded to API
+- **Solution**: Create test case for sample in M.K. Morse system, or proceed with local-only operation
+
+**6. Observation Creation Failed**
+```
+[ERROR] Failed to create observation: ...
+```
+- **Cause**: API unavailable, network error, or invalid test case ID
+- **Impact**: Inspection will NOT start (prevents orphaned images)
+- **Solution**: Check network connection to API server, verify QR code scanned correctly, try re-scanning
+
+**7. Upload Failed for Individual Tooth**
+```
+[API] ❌ Upload failed for tooth 5 to observation 123: Connection timeout
+```
+- **Cause**: Network issue, API server down, or file read error
+- **Impact**: Inspection continues (non-blocking), other images still upload
+- **Solution**: Check console logs for which teeth failed, retry upload manually if needed
+
+**8. SSL Certificate Verification Error**
+```
+SSLError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed
+```
+- **Cause**: Self-signed certificate on API server
+- **Solution**: Already handled - verify=False and InsecureRequestWarning suppressed in api_client.py
+- **Note**: This is expected behavior with the M.K. Morse API
+
 ---
 
 ## Development Notes
@@ -543,14 +763,26 @@ with MotionController(config) as motion:
 
 ## Version History
 
-- **Current Version**: Windows Branch (Latest)
+- **Current Version**: QR-Code Branch (Latest) - API Integration
+  - **QR Code Integration**: Scan QR codes to fetch sample data from M.K. Morse API
+  - **API Integration**: Automatic observation creation and image uploads
+  - **Non-Blocking Uploads**: Background threading for uploads (inspection runs at full speed)
+  - **1-Based Tooth Numbering**: Files and API tags use tooth_0001, tooth_0002, etc.
+  - **Auto-Focus QR Field**: QR scan field focused on startup for immediate scanning
+  - **Comprehensive API Logging**: All API requests/responses logged to console for debugging
+  - **HTTPS Support**: Default API endpoint uses HTTPS with self-signed certificate support
+  - Auto-populated teeth count from API sample design
+  - Warnings for missing test cases (local-only mode)
+  - Git commit: d25f063
+
+- **Previous Version**: Windows Branch
   - Single resolution camera (2560x1920)
   - Flash captured images during inspection
   - Fixed preview sizing issues
   - DirectShow backend support
   - Removed GUI logs panel
 
-- **Previous Version**: CV-Camera Branch
+- **Earlier Version**: CV-Camera Branch
   - Dual resolution camera support
   - GUI logs panel
   - Live preview during inspection
