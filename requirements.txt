@@ -7,3 +7,6 @@ pypylon>=2.0.0
 
 # Motion controller
 pyserial>=3.5
+
+# API client
+requests>=2.31.0

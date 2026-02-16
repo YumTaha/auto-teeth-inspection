@@ -1,6 +1,7 @@
 # main.py
 from __future__ import annotations
 
+import json
 import os
 import threading
 import tkinter as tk
@@ -14,6 +15,7 @@ from PIL import Image, ImageTk
 from motion import MotionController, MotionConfig
 from usbc_camera import USBCCamera
 from runner import run_inspection, RunConfig
+from api_client import ApiClient, api_config_from_env, extract_teeth_from_context
 
 
 class InspectionGUI:
@@ -117,6 +119,14 @@ class InspectionGUI:
         self.camera_index_combo = ttk.Combobox(config_frame, textvariable=self.camera_index_var, width=18, state="readonly")
         self.camera_index_combo.grid(row=4, column=1, sticky=tk.W, padx=5, pady=2)
 
+        # QR Scan
+        ttk.Label(config_frame, text="QR Scan:").grid(row=5, column=0, sticky=tk.W, pady=2)
+        self.qr_var = tk.StringVar(value="")
+        self.qr_entry = ttk.Entry(config_frame, textvariable=self.qr_var, width=20)
+        self.qr_entry.grid(row=5, column=1, sticky=tk.W, padx=5, pady=2)
+        ttk.Label(config_frame, text="(scan then press Enter)", foreground="gray").grid(row=5, column=2, sticky=tk.W, padx=5, pady=2)
+        self.qr_entry.bind("<Return>", self._on_qr_scanned)
+
         # ========== Control Buttons Frame ==========
         control_frame = ttk.LabelFrame(self.root, text="Controls", padding=10)
         control_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -175,6 +185,56 @@ class InspectionGUI:
         directory = filedialog.askdirectory(initialdir=self.outdir_var.get())
         if directory:
             self.outdir_var.set(directory)
+
+    def _on_qr_scanned(self, event=None):
+        """Handle QR code scan completion."""
+        qr_data = self.qr_var.get().strip()
+        self.qr_var.set("")  # Clear field for next scan
+        
+        if not qr_data:
+            return
+        
+        # Try to parse as JSON to extract identifier
+        identifier = qr_data
+        try:
+            parsed = json.loads(qr_data)
+            if isinstance(parsed, dict) and "identifier" in parsed:
+                identifier = parsed["identifier"]
+                self._log(f"Parsed QR code: type={parsed.get('type', 'N/A')}, identifier={identifier}")
+        except (json.JSONDecodeError, ValueError):
+            # Not JSON, use as-is
+            self._log(f"Using QR code as identifier: {identifier}")
+        
+        # Get API configuration
+        api_config = api_config_from_env()
+        
+        # Fetch sample context in background thread
+        def worker():
+            try:
+                client = ApiClient(api_config)
+                self._log(f"Fetching sample context for: {identifier}")
+                context = client.get_sample_context(identifier)
+                teeth = extract_teeth_from_context(context)
+                
+                # Update GUI on main thread
+                def update_gui():
+                    self.teeth_var.set(str(teeth))
+                    self._log(f"Auto-populated Teeth Count: {teeth}")
+                
+                self.root.after(0, update_gui)
+                
+            except Exception as e:
+                # Capture error message before nested function
+                error_msg = str(e)
+                
+                # Log error on main thread
+                def log_error():
+                    self._log(f"Error fetching sample context: {error_msg}")
+                
+                self.root.after(0, log_error)
+        
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
 
     def _log(self, message: str):
         """Log message to console (no GUI log panel)."""
