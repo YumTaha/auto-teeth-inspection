@@ -146,22 +146,13 @@ class InspectionGUI:
         self.exit_btn = ttk.Button(btn_row2, text="Exit", command=self._on_closing, width=15)
         self.exit_btn.pack(side=tk.LEFT, padx=5)
 
-        # ========== Camera Preview & Log Display (Vertical Stack) ==========
-        # Create a PanedWindow for resizable vertical split
-        self.paned_window = ttk.PanedWindow(self.root, orient=tk.VERTICAL)
-        self.paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-
-        # Top pane: Camera Preview (Large)
-        preview_frame = ttk.LabelFrame(self.paned_window, text="Camera Preview", padding=10)
+        # ========== Camera Preview (Square) ==========
+        preview_frame = ttk.LabelFrame(self.root, text="Camera Preview", padding=10)
+        preview_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # Create container for camera preview - use fill=BOTH to expand properly
         self.preview_label = tk.Label(preview_frame, bg="black")
         self.preview_label.pack(fill=tk.BOTH, expand=True)
-        self.paned_window.add(preview_frame, weight=5)
-
-        # Bottom pane: Log Display (Compact - 4 lines)
-        log_frame = ttk.LabelFrame(self.paned_window, text="Log", padding=5)
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=4, state=tk.DISABLED, wrap=tk.WORD)
-        self.log_text.pack(fill=tk.BOTH, expand=True)
-        self.paned_window.add(log_frame, weight=1)
 
     def _populate_camera_list(self):
         """Populate the camera index dropdown with available cameras."""
@@ -185,15 +176,8 @@ class InspectionGUI:
             self.outdir_var.set(directory)
 
     def _log(self, message: str):
-        """Add message to log display (thread-safe)."""
-        def update():
-            self.log_text.config(state=tk.NORMAL)
-            self.log_text.insert(tk.END, message + "\n")
-            self.log_text.see(tk.END)
-            self.log_text.config(state=tk.DISABLED)
-        
-        # Schedule update on main thread
-        self.root.after(0, update)
+        """Log message to console (no GUI log panel)."""
+        print(message)
 
     def _update_button_states(self):
         """Update button enabled/disabled states based on connection and running status."""
@@ -317,14 +301,20 @@ class InspectionGUI:
                 preview_width = self.preview_label.winfo_width()
                 preview_height = self.preview_label.winfo_height()
                 
-                # Use actual dimensions if available, otherwise use large defaults
-                max_width = preview_width if preview_width > 1 else 1200
-                max_height = preview_height if preview_height > 1 else 800
+                # Use larger defaults if widget hasn't been sized yet
+                # Assume reasonable window size for preview area
+                max_width = preview_width if preview_width > 100 else 1000
+                max_height = preview_height if preview_height > 100 else 800
                 
                 # Calculate scaling factor to maintain aspect ratio
                 scale = min(max_width / width, max_height / height)
                 new_width = int(width * scale)
                 new_height = int(height * scale)
+                
+                # Ensure minimum size to prevent tiny preview
+                if new_width < 400:
+                    new_width = min(800, width)
+                    new_height = int(height * (new_width / width))
                 
                 frame_resized = cv2.resize(frame_rgb, (new_width, new_height))
                 

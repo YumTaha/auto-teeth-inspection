@@ -14,22 +14,18 @@ class USBCCamera:
     USB-C camera using OpenCV (cv2.VideoCapture) for webcam/USB camera access.
     Implements the same interface as BaslerCamera and MockCamera.
     
-    Uses dual resolution strategy:
-    - Preview: 1280x960 for smooth live view
-    - Capture: 2560x1920 for high-quality images
+    Uses single high resolution (2560x1920) for both preview and capture to avoid
+    Windows camera indicator flashing during resolution switching.
     """
 
-    def __init__(self, device_index: int = 1, preview_width: int = 1280, preview_height: int = 960,
-                 capture_width: int = 2560, capture_height: int = 1920):
+    def __init__(self, device_index: int = 1, width: int = 2560, height: int = 1920):
         self.device_index = device_index
         self._cap: Optional[cv2.VideoCapture] = None
         self._lock = threading.Lock()  # Prevent simultaneous access from preview and capture
         
         # Resolution settings
-        self.preview_width = preview_width
-        self.preview_height = preview_height
-        self.capture_width = capture_width
-        self.capture_height = capture_height
+        self.width = width
+        self.height = height
 
     @property
     def is_open(self) -> bool:
@@ -49,9 +45,9 @@ class USBCCamera:
             self._cap = None
             raise RuntimeError(f"Failed to open camera at index {self.device_index}")
         
-        # Set preview resolution for smooth live view
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.preview_width)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.preview_height)
+        # Set high resolution for both preview and capture
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
 
     def close(self) -> None:
         if self._cap is not None:
@@ -65,41 +61,28 @@ class USBCCamera:
             raise RuntimeError("USB-C camera not open.")
 
         with self._lock:
-            # Switch to high resolution for capture
-            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.capture_width)
-            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.capture_height)
-            
-            # Flush buffer by reading frames to ensure we get a fresh capture at new resolution
-            for _ in range(5):
+            # Flush buffer by reading frames to ensure we get a fresh capture
+            # This prevents capturing stale frames from when motor was moving
+            for _ in range(3):
                 self._cap.read()
                 time.sleep(0.03)
             
-            # Now capture the actual frame at high resolution
+            # Capture the frame
             ret, frame = self._cap.read()
             if not ret or frame is None:
-                # Switch back to preview resolution before raising error
-                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.preview_width)
-                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.preview_height)
                 raise RuntimeError("Failed to capture frame from USB-C camera.")
 
             # Save as PNG
             success = cv2.imwrite(filepath, frame)
             if not success:
-                # Switch back to preview resolution before raising error
-                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.preview_width)
-                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.preview_height)
                 raise RuntimeError(f"Failed to save image to {filepath}")
             
-            # Switch back to preview resolution for smooth preview
-            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.preview_width)
-            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.preview_height)
-            
-            # Small delay to ensure resolution switch is complete
+            # Small delay to ensure file write is complete
             time.sleep(0.05)
 
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
         """
-        Read a single frame for preview (at preview resolution).
+        Read a single frame for preview.
         Returns (success, frame) tuple where frame is BGR numpy array or None.
         """
         if not self.is_open:
