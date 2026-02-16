@@ -85,19 +85,19 @@ class InspectionGUI:
 
         # COM Port
         ttk.Label(config_frame, text="COM Port:").grid(row=0, column=0, sticky=tk.W, pady=2)
-        self.port_var = tk.StringVar(value="/dev/ttyACM0")
+        self.port_var = tk.StringVar(value="COM9")
         self.port_entry = ttk.Entry(config_frame, textvariable=self.port_var, width=20)
         self.port_entry.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
 
         # Teeth Count
         ttk.Label(config_frame, text="Teeth Count:").grid(row=1, column=0, sticky=tk.W, pady=2)
-        self.teeth_var = tk.StringVar(value="60")
+        self.teeth_var = tk.StringVar(value="72")
         self.teeth_entry = ttk.Entry(config_frame, textvariable=self.teeth_var, width=20)
         self.teeth_entry.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
 
         # Captures
         ttk.Label(config_frame, text="Captures:").grid(row=2, column=0, sticky=tk.W, pady=2)
-        self.captures_var = tk.StringVar(value="60")
+        self.captures_var = tk.StringVar(value="72")
         self.captures_entry = ttk.Entry(config_frame, textvariable=self.captures_var, width=20)
         self.captures_entry.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
 
@@ -445,7 +445,7 @@ def main():
     motion = MotionController(cfg=MotionConfig(port=""))
 
     # Create USB-C camera (not opened yet)
-    camera = USBCCamera(device_index=0)
+    camera = USBCCamera(device_index=1)
 
     # Create GUI
     root = tk.Tk()

@@ -6,18 +6,30 @@ import cv2
 import numpy as np
 import time
 import threading
+import platform
 
 
 class USBCCamera:
     """
     USB-C camera using OpenCV (cv2.VideoCapture) for webcam/USB camera access.
     Implements the same interface as BaslerCamera and MockCamera.
+    
+    Uses dual resolution strategy:
+    - Preview: 1280x960 for smooth live view
+    - Capture: 2560x1920 for high-quality images
     """
 
-    def __init__(self, device_index: int = 0):
+    def __init__(self, device_index: int = 1, preview_width: int = 1280, preview_height: int = 960,
+                 capture_width: int = 2560, capture_height: int = 1920):
         self.device_index = device_index
         self._cap: Optional[cv2.VideoCapture] = None
         self._lock = threading.Lock()  # Prevent simultaneous access from preview and capture
+        
+        # Resolution settings
+        self.preview_width = preview_width
+        self.preview_height = preview_height
+        self.capture_width = capture_width
+        self.capture_height = capture_height
 
     @property
     def is_open(self) -> bool:
@@ -27,11 +39,19 @@ class USBCCamera:
         if self.is_open:
             return
 
-        self._cap = cv2.VideoCapture(self.device_index)
+        # Use DirectShow backend on Windows for better camera control
+        if platform.system() == 'Windows':
+            self._cap = cv2.VideoCapture(self.device_index, cv2.CAP_DSHOW)
+        else:
+            self._cap = cv2.VideoCapture(self.device_index)
         
         if not self._cap.isOpened():
             self._cap = None
             raise RuntimeError(f"Failed to open camera at index {self.device_index}")
+        
+        # Set preview resolution for smooth live view
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.preview_width)
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.preview_height)
 
     def close(self) -> None:
         if self._cap is not None:
@@ -45,29 +65,41 @@ class USBCCamera:
             raise RuntimeError("USB-C camera not open.")
 
         with self._lock:
-            # Flush buffer by reading more frames to ensure we get a fresh capture
-            # This prevents capturing frames from when the motor was still moving
-            # or frames that are being read by the preview loop
-            for _ in range(5):  # Increased from 3 to 5 for better buffer clearing
-                self._cap.read()
-                time.sleep(0.03)  # 30ms between flushes
+            # Switch to high resolution for capture
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.capture_width)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.capture_height)
             
-            # Now capture the actual frame
+            # Flush buffer by reading frames to ensure we get a fresh capture at new resolution
+            for _ in range(5):
+                self._cap.read()
+                time.sleep(0.03)
+            
+            # Now capture the actual frame at high resolution
             ret, frame = self._cap.read()
             if not ret or frame is None:
+                # Switch back to preview resolution before raising error
+                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.preview_width)
+                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.preview_height)
                 raise RuntimeError("Failed to capture frame from USB-C camera.")
 
             # Save as PNG
             success = cv2.imwrite(filepath, frame)
             if not success:
+                # Switch back to preview resolution before raising error
+                self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.preview_width)
+                self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.preview_height)
                 raise RuntimeError(f"Failed to save image to {filepath}")
             
-            # Small delay to ensure file write is complete
+            # Switch back to preview resolution for smooth preview
+            self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.preview_width)
+            self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.preview_height)
+            
+            # Small delay to ensure resolution switch is complete
             time.sleep(0.05)
 
     def read_frame(self) -> Tuple[bool, Optional[np.ndarray]]:
         """
-        Read a single frame for preview.
+        Read a single frame for preview (at preview resolution).
         Returns (success, frame) tuple where frame is BGR numpy array or None.
         """
         if not self.is_open:
@@ -103,7 +135,12 @@ class USBCCamera:
         
         try:
             for i in range(max_index):
-                cap = cv2.VideoCapture(i)
+                # Use DirectShow on Windows for detection
+                if platform.system() == 'Windows':
+                    cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+                else:
+                    cap = cv2.VideoCapture(i)
+                    
                 if cap.isOpened():
                     available.append(i)
                     consecutive_failures = 0
