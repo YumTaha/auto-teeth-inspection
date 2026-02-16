@@ -43,12 +43,13 @@ class ApiClient:
         r.raise_for_status()
         return r.json()
 
-    def create_observation(self, test_case_id: int, cut_number: int) -> Dict[str, Any]:
+    def create_observation(self, test_case_id: int, cut_number: int, scope: str = "cut") -> Dict[str, Any]:
         """Create an observation for a test case.
         
         Args:
             test_case_id: The test case ID from active_test_case
             cut_number: The cut number from active_test_case.total_cuts
+            scope: Observation scope - "cut" for normal inspections, "incoming" for initial inspection (cut_number=0)
             
         Returns:
             Response containing observation id
@@ -56,7 +57,7 @@ class ApiClient:
         url = f"{self.cfg.base_url.rstrip('/')}/test-cases/{test_case_id}/observations"
         payload = {
             "observation_type_id": 1,
-            "scope": "cut",
+            "scope": scope,
             "cut_number": cut_number,
             # observation_value omitted - will attach pictures instead
         }

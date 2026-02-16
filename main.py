@@ -487,8 +487,12 @@ class InspectionGUI:
                 try:
                     api_config = api_config_from_env()
                     client = ApiClient(api_config)
-                    self._log(f"Creating observation for test case {self.test_case_id}...")
-                    obs_response = client.create_observation(self.test_case_id, self.cut_number)
+                    
+                    # Determine scope: "incoming" if this is the first cut (cut_number=0), otherwise "cut"
+                    scope = "incoming" if self.cut_number == 0 else "cut"
+                    
+                    self._log(f"Creating observation for test case {self.test_case_id} (scope: {scope})...")
+                    obs_response = client.create_observation(self.test_case_id, self.cut_number, scope=scope)
                     
                     # Validate response
                     if obs_response is None:
