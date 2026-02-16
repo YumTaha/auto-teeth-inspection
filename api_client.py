@@ -43,13 +43,13 @@ class ApiClient:
         r.raise_for_status()
         return r.json()
 
-    def create_observation(self, test_case_id: int, cut_number: int, scope: str = "cut") -> Dict[str, Any]:
+    def create_observation(self, test_case_id: int, cut_number: int = None, scope: str = "cut") -> Dict[str, Any]:
         """Create an observation for a test case.
         
         Args:
             test_case_id: The test case ID from active_test_case
-            cut_number: The cut number from active_test_case.total_cuts
-            scope: Observation scope - "cut" for normal inspections, "incoming" for initial inspection (cut_number=0)
+            cut_number: The cut number (only included when scope="cut")
+            scope: Observation scope - "cut" for normal inspections, "incoming" for initial inspection
             
         Returns:
             Response containing observation id
@@ -58,9 +58,12 @@ class ApiClient:
         payload = {
             "observation_type_id": 1,
             "scope": scope,
-            "cut_number": cut_number,
-            # observation_value omitted - will attach pictures instead
         }
+        
+        # Only include cut_number for cut-scoped observations
+        if scope == "cut" and cut_number is not None:
+            payload["cut_number"] = cut_number
+        
         headers = self._headers()
         headers["Content-Type"] = "application/json"
         
