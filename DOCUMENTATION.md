@@ -2,7 +2,14 @@
 
 ## Overview
 
-The Auto Teeth Inspection System is a Python-based application designed for automated inspection of gear teeth using a motorized rotation system and a high-resolution USB-C camera. The system rotates a gear incrementally, capturing high-quality images at precise angles for quality control and inspection purposes.
+The Auto Teeth Inspection System is a Python-based application designed for automated inspection of gear teeth using a motorized rotation system and a high-resolution Dino-Lite camera. The system features automatic hardware detection, continuous health monitoring, and intelligent resource management to ensure reliable, high-speed inspection workflows.
+
+### Key Innovations
+- **Auto-Detection**: Automatically finds Dino-Lite camera by name and ESP32 motor by VID/PID
+- **Health Monitoring**: Continuous ping/pong protocol with adaptive retry timing
+- **Smart Resource Management**: Pauses monitoring during inspection to prevent serial port conflicts
+- **Background Uploads**: Non-blocking image uploads with automatic temp file cleanup
+- **Status Indicators**: Real-time visual feedback with status lights and button states
 
 ## System Architecture
 
@@ -45,23 +52,34 @@ The Auto Teeth Inspection System is a Python-based application designed for auto
 
 **Key Components**:
 - `InspectionGUI` class: Main application window and controller
-  - Configuration panel (COM port, QR scan, teeth count, output directory, camera index)
+  - Modern dark-themed UI with status monitoring
   - QR Scan field with auto-focus for immediate scanning
-  - Control buttons (Connect, Hold Motor, Release Motor, Start Inspection, Stop, Exit)
+  - Status lights (scan status, motor status)
+  - Control buttons (Lock/Release, Start/Stop)
   - Camera preview display with live feed or captured image flash
-  - Button state management based on system state
+  - Button state management based on motor connection and inspection state
+  - Motor health monitoring with automatic reconnection
   - API integration for observation creation and image upload
 
 **Key Features**:
-- Tkinter-based GUI with maximized window
+- Modern dark-themed UI ("AUTO TOOTH INSPECTION")
+- **Motor Health Monitoring**:
+  - Continuous ping every 3 seconds when connected
+  - Automatic reconnection every 1.5 seconds when disconnected
+  - Status light: green (connected), red (disconnected)
+  - Lock/Release button disabled when motor disconnected
+  - Overlay modal when motor not connected (can retry manually)
+  - **Smart Monitoring**: Pauses during inspection to prevent serial port conflicts
 - **QR Code Scanning**: Auto-focused field for USB scanner input
   - Parses JSON QR codes to extract sample identifier
   - Fetches sample context from API in background thread
   - Auto-populates teeth count
+  - Status light turns green on successful scan
   - Stores test case ID and cut number for observation creation
 - **API Integration**:
   - Creates observation on active test case when inspection starts
   - Passes observation ID to runner for image uploads
+  - Background uploads with temp file cleanup
   - Handles cases with no active test case (local-only mode)
 - Live camera preview at 2560x1920 resolution (~30 FPS when possible)
 - During inspection: pauses live preview and flashes each captured image
@@ -70,13 +88,19 @@ The Auto Teeth Inspection System is a Python-based application designed for auto
 
 **Key Methods**:
 - `_on_qr_scanned()`: Handle QR code scan, fetch sample context, extract data
-- `_toggle_connection()`: Connect/disconnect to Arduino motion controller
-- `_hold_motor()`: Enable motor and zero position
-- `_release_motor()`: Disable motor
-- `_start_inspection()`: Create observation, validate inputs, start inspection in background thread
+- `_start_motor_retry_loop()`: Start continuous motor health monitoring
+  - `tick()`: Internal function that pings motor and schedules next check
+  - Adaptive timing: 1.5s when disconnected, 3s when connected
+  - **Pauses during inspection** to avoid serial port conflicts
+- `_motor_connect_worker()`: Background thread to reconnect motor
+- `_toggle_blade_lock()`: Lock/release motor (disabled when disconnected)
+- `_start_or_stop()`: Toggle inspection start/stop
 - `_update_preview()`: Continuous camera preview update loop
 - `_display_captured_image()`: Flash captured images during inspection
-- `_run_inspection_worker()`: Background thread that runs the inspection sequence
+- `_run_inspection_loop()`: Background thread that runs the inspection sequence
+- `_set_light()`: Update scan status indicator (green/red)
+- `_set_motor_light()`: Update motor status indicator (green/red)
+- `_update_button_states()`: Enable/disable buttons based on state
 
 **API Instance Variables**:
 - `sample_context`: Full sample context from API
@@ -95,39 +119,52 @@ The Auto Teeth Inspection System is a Python-based application designed for auto
 
 ---
 
-### **motion.py** - Arduino Motion Controller Interface
+### **motion.py** - ESP32 Motion Controller Interface
 
-**Purpose**: Provides a Python interface to communicate with an Arduino-based motion controller via serial (USB/COM port).
+**Purpose**: Provides a Python interface to communicate with an ESP32-based motion controller via serial (USB/COM port) with automatic detection and health monitoring.
 
 **Key Components**:
 - `MotionConfig` dataclass: Configuration for serial connection
-  - `port`: COM port (e.g., "COM9" on Windows, "/dev/ttyACM0" on Linux)
+  - `port`: COM port (auto-detected if None, searches for ESP32 CH340)
   - `baud`: Baud rate (default 115200)
-  - `connect_reset_delay_s`: Delay after connection for Arduino reset (2.0s)
+  - `connect_reset_delay_s`: Delay after connection for ESP32 reset (2.0s)
   - `read_timeout_s`: Serial read timeout (0.05s)
   - `write_timeout_s`: Serial write timeout (0.2s)
-  - `done_token`: Token Arduino sends when motion completes ("DONE")
+  - `done_token`: Token ESP32 sends when motion completes ("DONE")
 
 - `MotionController` class: Main controller interface
   - Manages serial connection lifecycle
-  - Sends commands to Arduino
+  - Sends commands to ESP32
   - Waits for motion completion
+  - **Health monitoring with ping/pong protocol**
+  - **Auto-detection by VID/PID**
+  - **Automatic reconnection support**
 
-**Arduino Protocol**:
+**ESP32 Protocol**:
 ```
-Commands (sent to Arduino):
+Commands (sent to ESP32):
   H\n  - Hold/enable motor
   R\n  - Release/disable motor
   Z\n  - Zero current position (set to 0 degrees)
   M<degrees>\n  - Move to absolute angle (e.g., "M45.000000\n")
+  P\n  - Ping for health check
 
-Responses (from Arduino):
+Responses (from ESP32):
   DONE\n  - Motion complete
+  PONG\n  - Health check response
 ```
 
 **Key Methods**:
 - `connect()`: Open serial port and initialize connection
+  - Auto-detects ESP32 if port is None
+  - Automatically releases motor after connection
 - `close()`: Close serial port
+- `reconnect()`: Close then reopen connection (for recovery)
+- `find_esp_port()`: Auto-detect ESP32 by VID (0x1A86) and PID (0x55D4)
+- `ping(timeout)`: Send ping command and wait for PONG response
+  - Default timeout: 0.2 seconds
+  - Returns True if PONG received
+  - Closes connection and returns False on exception
 - `hold()`: Enable motor holding current
 - `release()`: Disable motor holding current
 - `zero()`: Set current position as zero reference
@@ -137,23 +174,34 @@ Responses (from Arduino):
 
 **Key Features**:
 - Non-blocking read with buffered line parsing
-- Timeout support for motion completion
+- Timeout support for motion completion and health checks
 - Stop flag support for user cancellation
-- Automatic Arduino reset handling on connection
+- Automatic ESP32 reset handling on connection
+- **Auto-detection by USB VID/PID** (CH340: VID=0x1A86, PID=0x55D4)
+- **Health monitoring** with 200ms ping timeout
+- **Automatic recovery** via reconnect() method
+- **Text-based protocol** with newline-terminated messages
 
 ---
 
-### **usbc_camera.py** - USB-C Camera Interface
+### **usbc_camera.py** - Dino-Lite Camera Interface
 
-**Purpose**: Provides an interface for USB-C/webcam capture using OpenCV with Windows DirectShow optimization.
+**Purpose**: Provides an interface for Dino-Lite Edge 3.0 camera using OpenCV with Windows DirectShow optimization and automatic detection.
 
 **Key Components**:
 - `USBCCamera` class: Camera control and capture
   - Single resolution mode: 2560x1920 for both preview and capture
   - Thread-safe frame access with mutex locks
   - DirectShow backend on Windows for better performance
+  - **Auto-detection by camera name using pygrabber**
 
 **Key Features**:
+- **Auto-Detection**:
+  - Uses pygrabber's FilterGraph to enumerate DirectShow devices
+  - Searches for "dino-lite" or "dinolite" in device names (case-insensitive)
+  - Prints all detected cameras if Dino-Lite not found
+  - Raises RuntimeError if no Dino-Lite detected
+  
 - **Single Resolution Strategy**: Uses 2560x1920 for both preview and capture
   - Eliminates Windows camera on/off indicator flashing
   - No resolution switching during operation
@@ -169,6 +217,10 @@ Responses (from Arduino):
   - Safe for multi-threaded GUI applications
 
 **Key Methods**:
+- `find_external_camera()`: Static method to auto-detect Dino-Lite
+  - Returns camera index if found, None otherwise
+  - Prints detected camera info and all available devices
+- `__init__(device_index)`: Initialize camera (auto-detects if device_index is None)
 - `open()`: Initialize camera with DirectShow backend (Windows) or default (Linux)
 - `close()`: Release camera resources
 - `capture_to(filepath)`: Capture and save image to PNG file
@@ -272,8 +324,7 @@ $env:MKMORSE_API_BASE_URL = "https://eng-ubuntu.mkmorse.local/api"  # Optional
   - `make_run_subfolder`: Create timestamped subfolder (default True)
   - `observation_id`: Optional observation ID for API uploads
   - `api_config`: Optional API config for uploads
-
-- `run_inspection()` function: Main inspection loop
+- `cleanup_temp_files`: Delete temp files after successful upload (default False)
   - Takes motion controller, camera, and callbacks
   - Executes full inspection sequence with non-blocking uploads
   - Returns directory where images were saved
@@ -298,6 +349,7 @@ $env:MKMORSE_API_BASE_URL = "https://eng-ubuntu.mkmorse.local/api"  # Optional
 - Upload failures don't stop inspection
 - Upload success/failure logged to console
 - Multiple uploads can run simultaneously
+- **Temp file cleanup**: Files deleted after successful upload when `cleanup_temp_files=True`
 - Inspection runs at full speed regardless of upload time
 
 **Callbacks**:
@@ -367,11 +419,20 @@ for i in range(captures):
 ### 1. **Startup**
 ```
 1. User runs main.py
-2. GUI window opens (maximized)
-3. System detects available cameras (shows DirectShow warnings for non-existent indices)
-4. Camera dropdown populated with available cameras
-5. Default configuration loaded (COM port, teeth count, etc.)
-6. QR Scan field automatically focused for immediate scanning
+2. GUI window opens (zoomed/maximized)
+3. System auto-detects hardware:
+   a. Camera: Searches for Dino-Lite by name using pygrabber
+      - Prints: "[CAMERA] Detected Dino-Lite at index X: <name>"
+      - Raises error if not found
+   b. Motor: Searches for ESP32 by VID/PID (0x1A86/0x55D4)
+      - Auto-starts connection retry loop
+      - Shows motor overlay if not connected
+   c. Motor status light: Red (disconnected), Green (connected)
+4. Default configuration loaded (teeth count 72)
+5. QR Scan field automatically focused for immediate scanning
+6. Motor health monitoring starts:
+   - Pings every 3 seconds when connected
+   - Retries connection every 1.5 seconds when disconnected
 ```
 
 ### 2. **QR Code Scanning (Optional)**
@@ -397,85 +458,132 @@ for i in range(captures):
 
 ### 3. **Connection**
 ```
-1. User enters COM port (e.g., COM9)
-2. User clicks "Connect"
-3. System opens serial connection to Arduino
-4. Arduino resets (2 second delay)
+1. System automatically attempts motor connection on startup
+2. find_esp_port() searches for CH340 USB device (VID: 0x1A86, PID: 0x55D4)
+3. Serial connection opened at 115200 baud
+4. ESP32 resets (2 second delay)
 5. Serial buffer cleared
-6. Status: Connected (button changes to "Disconnect")
+6. Motor automatically released ("R\n" command)
+7. Health monitoring begins (ping every 3s)
+8. Motor status light: Green
+9. Lock/Release button: Enabled
+10. Motor overlay: Hidden
+Status: Connected and monitoring
 ```
 
 ### 4. **Motor Setup**
 ```
-1. User clicks "Hold Motor"
+1. User clicks "Lock" button
 2. System sends "H\n" command (enable motor)
 3. System sends "Z\n" command (zero position)
 4. Motor is now holding at position 0.0 degrees
-5. Status: Motor enabled and zeroed
+5. Button shows "Release"
+Status: Motor locked and zeroed
 ```
 
 ### 5. **Camera Preview**
 ```
-1. User selects camera index from dropdown
-2. User clicks "Connect" (if not already connected)
-3. Camera opens with DirectShow backend (Windows)
-4. Resolution set to 2560x1920
-5. Preview starts at ~30 FPS
-6. Images scaled to fit preview area
-7. Status: Live preview running
+1. System auto-detects Dino-Lite camera on startup
+   - Uses pygrabber FilterGraph to enumerate DirectShow devices
+   - Matches "dino-lite" or "dinolite" in camera name
+2. Camera opens with DirectShow backend (Windows)
+3. Resolution set to 2560x1920
+4. Preview starts automatically at ~30 FPS
+5. Images scaled to fit preview area
+Status: Live preview running
 ```
 
 ### 6. **Inspection Run**
 ```
 1. User sets configuration (or auto-populated from QR scan):
    - Teeth count: 60  (from QR scan or manual entry)
-   - Output dir: ./captures
    - Captures matches teeth count automatically
    
-2. User clicks "Start Inspection"
+2. User clicks "Start/Stop" button
 3. System validates inputs
-4. If test case ID exists from QR scan:
+4. **Motor monitoring pauses** (tick() returns early during inspection)
+   - Prevents serial port conflicts between ping and move commands
+   - Monitoring resumes after inspection completes
+5. If test case ID exists from QR scan:
    a. Create observation on test case via API:
       - POST /test-cases/{test_case_id}/observations
       - Payload: observation_type_id=1, scope="cut", cut_number
    b. Store observation ID for uploads
    c. Log: "✓ Created observation ID: 123"
-5. If no test case: Log warning "Running locally without API upload"
-6. Live preview pauses
-7. Creates timestamped output folder
-8. For each of 60 captures (teeth):
+6. If no test case: Log warning "Running locally without API upload"
+7. Live preview pauses
+8. Creates temporary directory (if cleanup enabled) or timestamped folder
+9. For each of 60 captures (teeth):
    a. Calculate angle: 0°, 6°, 12°, ... 354°
    b. Send move command: "M6.000000\n"
    c. Wait for "DONE" response (max 15s)
+      - No ping commands interfere (monitoring paused)
    d. Flush camera buffer (3 frames, 90ms total)
    e. Capture image to PNG (tooth_0001, tooth_0002, ...)
    f. Start background upload thread (non-blocking):
       - POST /observations/{observation_id}/upload
       - Multipart: file + tag (tooth number 1-based)
       - Log: "✓ Uploaded tooth_1 to observation" (async)
+      - **Delete temp file after successful upload**
    g. Flash image in preview immediately
    h. Continue to next tooth without waiting for upload
    i. Log progress to console
-9. Inspection complete (uploads continue in background)
-10. Live preview resumes
-11. Background upload threads finish
-12. Status: Inspection complete, all images uploaded
+10. Inspection complete (uploads continue in background)
+11. Live preview resumes
+12. **Motor monitoring resumes** (health checks restart)
+13. Background upload threads finish
+14. Temp files deleted (only temp directory remains)
+Status: Inspection complete, all images uploaded, temp files cleaned
 ```
 
 ### 7. **Shutdown**
 ```
-1. User clicks "Exit" or closes window
+1. User clicks close button (X) or presses Alt+F4
 2. Live preview stops
 3. Camera released
-4. Serial connection closed (if open)
-5. Application exits
+4. Motor monitoring stops
+5. Serial connection closed (if open)
+6. Application exits cleanly
 ```
 
 ---
 
 ## Key Technical Decisions
 
-### 1. **Single Resolution for Camera**
+### 1. **Auto-Detection Instead of Manual Configuration**
+- **Decision**: Auto-detect both camera (by name) and motor (by VID/PID)
+- **Rationale**:
+  - Eliminates user configuration errors
+  - Faster workflow (no manual COM port entry)
+  - Works across different computers without reconfiguration
+  - Prevents connecting to wrong devices
+- **Implementation**: pygrabber for camera names, serial.tools.list_ports for USB VID/PID
+- **Trade-off**: Requires specific hardware (Dino-Lite Edge 3.0, ESP32 with CH340)
+
+### 2. **Health Monitoring with Ping/Pong Protocol**
+- **Decision**: Continuous motor health monitoring with adaptive timing
+- **Rationale**:
+  - Immediate detection of disconnections
+  - Visual feedback with status lights
+  - Automatic reconnection without user intervention
+  - Prevents starting inspection with disconnected motor
+- **Implementation**: 
+  - Custom "P\n" command with "PONG\n" response
+  - 200ms timeout for health checks
+  - 3s interval when connected, 1.5s when disconnected
+- **Trade-off**: Additional serial traffic, requires Arduino firmware support
+
+### 3. **Pause Monitoring During Inspection**
+- **Decision**: Skip health monitoring while inspection is running
+- **Rationale**:
+  - Prevents serial port race conditions
+  - PONG and DONE responses could collide
+  - Inspection thread needs exclusive serial port access
+  - Monitoring resumes immediately after completion
+- **Implementation**: Check `is_running` flag in tick() function, return early
+- **Trade-off**: No health monitoring during inspection (acceptable, inspection is short)
+
+### 4. **Single Resolution for Camera**
 - **Decision**: Use 2560x1920 for both preview and capture
 - **Rationale**: 
   - Eliminates Windows camera indicator flashing during resolution switching
@@ -483,7 +591,7 @@ for i in range(captures):
   - Modern hardware can handle high-res preview
 - **Trade-off**: Higher CPU usage for preview, but acceptable on modern systems
 
-### 2. **DirectShow Backend on Windows**
+### 5. **DirectShow Backend on Windows**
 - **Decision**: Use `cv2.CAP_DSHOW` on Windows for camera access
 - **Rationale**:
   - Better camera control and performance
@@ -492,7 +600,7 @@ for i in range(captures):
   - Standard Windows camera API
 - **Cross-platform**: Falls back to default backend on Linux/Mac
 
-### 3. **Flash Captured Images During Inspection**
+### 6. **Flash Captured Images During Inspection**
 - **Decision**: Pause live preview and flash each captured image
 - **Rationale**:
   - Prevents camera indicator from flashing on/off
@@ -501,7 +609,7 @@ for i in range(captures):
   - User sees what was actually captured
 - **Implementation**: Callback from runner to GUI for image display
 
-### 4. **Thread-Safe Design**
+### 7. **Thread-Safe Design**
 - **Decision**: Use mutex locks for camera access, Event flags for stop signals
 - **Rationale**:
   - GUI runs in main thread (Tkinter requirement)
@@ -510,7 +618,7 @@ for i in range(captures):
   - Stop button needs to signal background thread
 - **Implementation**: `threading.Lock` for camera, `threading.Event` for stop
 
-### 5. **Buffer Flushing Before Capture**
+### 8. **Buffer Flushing Before Capture**
 - **Decision**: Read and discard 3 frames before capturing
 - **Rationale**:
   - Ensures fresh frame after motor stops
@@ -518,26 +626,28 @@ for i in range(captures):
   - OpenCV buffers several frames internally
 - **Timing**: 30ms delay between flushes (total ~90ms)
 
-### 6. **Logs to Console Instead of GUI**
-- **Decision**: Remove GUI log panel, print to console
-- **Rationale**:
-  - More space for camera preview
-  - Simpler GUI layout
-  - Console logs persist after program exit
-  - Easier debugging and log capture
-- **Trade-off**: Users must run from terminal to see logs
-
-### 7. **Non-Blocking Background Uploads**
-- **Decision**: Upload images in separate daemon threads while inspection continues
+### 9. **Non-Blocking Background Uploads with Temp Cleanup**
+- **Decision**: Upload images in separate daemon threads, delete after success
 - **Rationale**:
   - Inspection runs at full speed regardless of network conditions
   - No delay between captures waiting for uploads
   - Upload failures don't stop inspection
   - Multiple uploads can run simultaneously
+  - Saves disk space (temp files deleted)
+  - Only uploads persist in API database
 - **Implementation**: Each upload spawns a daemon thread with upload_worker function
 - **Trade-off**: Upload completion is asynchronous (check console logs for status)
 
-### 8. **QR Code JSON Parsing**
+### 10. **Temp Files vs Permanent Storage**
+- **Decision**: Use temp directory with cleanup when API enabled, permanent folders when local-only
+- **Rationale**:
+  - API is source of truth (images in database)
+  - No need to keep local copies after upload
+  - Saves disk space on inspection machine
+  - Local-only mode still preserves files for backup
+- **Implementation**: `cleanup_temp_files` flag in RunConfig
+
+### 11. **QR Code JSON Parsing**
 - **Decision**: Parse QR codes as JSON to extract identifier field
 - **Rationale**:
   - QR codes contain structured data: {"type":"sample","identifier":"TEST_60"}
@@ -546,7 +656,7 @@ for i in range(captures):
   - Explicit field extraction prevents errors
 - **Implementation**: Try JSON parse, fallback to raw string on error
 
-### 9. **Tooth Numbering Starts at 1**
+### 12. **Tooth Numbering Starts at 1**
 - **Decision**: File names and API tags use 1-based numbering (tooth_0001, tooth_0002, ...)
 - **Rationale**:
   - More intuitive for users (first tooth is #1, not #0)
@@ -555,14 +665,23 @@ for i in range(captures):
   - API tags align with user expectations
 - **Implementation**: `tooth_num = i + 1` where i is loop index (0-based)
 
-### 10. **Auto-Focus QR Scan Field**
-- **Decision**: QR Scan field receives focus automatically on startup
+### 13. **Status Lights Instead of Text Labels**
+- **Decision**: Use colored circles (green/red) for status indicators
 - **Rationale**:
-  - Most common workflow starts with QR scan
-  - Allows immediate scanning without clicking
-  - USB scanners type and auto-enter
-  - Reduces user interaction steps
-- **Implementation**: `qr_entry.focus_set()` after GUI build
+  - Instant visual feedback
+  - Color-coded for quick recognition
+  - Less UI clutter than text messages
+  - Modern, clean interface
+- **Implementation**: Canvas with oval shapes, color updates
+
+### 14. **Motor Overlay Modal**
+- **Decision**: Show full-screen overlay when motor disconnected
+- **Rationale**:
+  - Prevents operation without motor
+  - Clear visual indication of problem
+  - Provides manual retry option
+  - Blocks UI interaction until resolved
+- **Implementation**: Tkinter frame with place() geometry, manual retry button
 
 ---
 
@@ -620,27 +739,27 @@ Project Root/
 
 ## Hardware Requirements
 
-### Motion Controller (Arduino)
-- Arduino Uno/Nano/Mega or compatible
-- USB connection for serial communication
-- Must implement the command protocol (H, R, Z, M commands)
+### Motion Controller (ESP32)
+- ESP32 development board with CH340 USB-to-Serial (VID: 0x1A86, PID: 0x55D4)
+- USB connection for serial communication (auto-detected)
+- Must implement the command protocol (H, R, Z, M, P commands)
 - Must send "DONE\n" after completing movements
+- Must send "PONG\n" in response to ping commands
 - Recommended: Stepper motor with driver (TMC2209, DRV8825, etc.)
 
 ### Camera
-- USB-C camera or USB webcam
-- Minimum resolution: 2560x1920
+- **Dino-Lite Edge 3.0** USB microscope camera (required for auto-detection)
+- Resolution: 2560x1920 or higher
 - Supported by OpenCV VideoCapture
 - Windows: DirectShow compatible
-- Must support MJPEG or raw frame capture
+- USB 3.0 recommended for best performance
 
 ### Computer
 - Windows 10/11 (primary target)
 - Python 3.11 or higher
-- Available COM port for Arduino
-- Available USB port for camera
+- USB ports for ESP32 and camera
 - Recommended: 8GB+ RAM for high-res preview
-- Recommended: Modern CPU for real-time preview
+- Recommended: Modern CPU for real-time preview and background uploads
 
 ---
 
@@ -763,26 +882,38 @@ with MotionController(config) as motion:
 
 ## Version History
 
-- **Current Version**: QR-Code Branch (Latest) - API Integration
+- **Current Version**: Production v2.0 - Auto-Detection & Health Monitoring
+  - **Auto-Detection**: Automatically finds Dino-Lite camera by name and ESP32 motor by VID/PID
+  - **Health Monitoring**: Continuous ping/pong protocol with adaptive timing
+  - **Smart Resource Management**: Pauses monitoring during inspection to prevent serial port conflicts
+  - **Status Indicators**: Real-time visual feedback with colored status lights
+  - **Motor Overlay**: Full-screen modal when motor disconnected with manual retry
+  - **Temp File Cleanup**: Automatically deletes temp files after successful upload
+  - **Button State Management**: Lock/Release button disabled when motor disconnected
+  - **pygrabber Integration**: Uses FilterGraph for DirectShow device enumeration
+  - **ESP32 Support**: Auto-detects CH340 USB devices (VID: 0x1A86, PID: 0x55D4)
+  - **Adaptive Retry Timing**: 1.5s when disconnected, 3s health check when connected
+  - **Serial Port Conflict Prevention**: Monitor tick() returns early during inspection
+  - **1-Based Tooth Numbering**: Files and API tags use tooth_0001, tooth_0002, etc.
+  
+- **Previous Version**: Production v1.0 - API Integration
   - **QR Code Integration**: Scan QR codes to fetch sample data from M.K. Morse API
   - **API Integration**: Automatic observation creation and image uploads
   - **Non-Blocking Uploads**: Background threading for uploads (inspection runs at full speed)
-  - **1-Based Tooth Numbering**: Files and API tags use tooth_0001, tooth_0002, etc.
   - **Auto-Focus QR Field**: QR scan field focused on startup for immediate scanning
   - **Comprehensive API Logging**: All API requests/responses logged to console for debugging
   - **HTTPS Support**: Default API endpoint uses HTTPS with self-signed certificate support
   - Auto-populated teeth count from API sample design
   - Warnings for missing test cases (local-only mode)
-  - Git commit: d25f063
 
-- **Previous Version**: Windows Branch
+- **Earlier Version**: Windows Branch
   - Single resolution camera (2560x1920)
   - Flash captured images during inspection
   - Fixed preview sizing issues
   - DirectShow backend support
   - Removed GUI logs panel
 
-- **Earlier Version**: CV-Camera Branch
+- **Initial Version**: CV-Camera Branch
   - Dual resolution camera support
   - GUI logs panel
   - Live preview during inspection
