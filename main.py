@@ -26,7 +26,6 @@ from api_client import (
 # CONFIG (change here)
 # ==============================
 CAMERA_INDEX = 1          # <- change if wrong camera
-MOTOR_PORT = "COM9"       # <- change as needed
 PREVIEW_FPS = 30
 SIDE_WIDTH = 320
 MOTOR_RETRY_MS = 1500     # retry motor connection every N ms
@@ -96,7 +95,7 @@ class InspectionGUI(tk.Tk):
 
         self.motor_overlay_msg = tk.Label(
             card,
-            text=f"Please connect the motor on {MOTOR_PORT}.",
+            text=f"Please connect the motor.",
             bg="#2a2a2a",
             fg="#d1d5db",
             font=("Segoe UI", 11),
@@ -146,17 +145,17 @@ class InspectionGUI(tk.Tk):
                 self.motion.connect()
 
             self.motor_connected = True
-            self.after(0, lambda: self._set_motor_light(True, f"Connected ({MOTOR_PORT})"))
+            self.after(0, lambda: self._set_motor_light(True, f"Connected"))
             self.after(0, self._hide_motor_overlay)
 
         except Exception as e:
             self.motor_connected = False
             err = str(e)
-            self.after(0, lambda: self._set_motor_light(False, f"Not connected ({MOTOR_PORT})"))
+            self.after(0, lambda: self._set_motor_light(False, f"Not connected"))
             self.after(
                 0,
                 lambda m=err: self._show_motor_overlay(
-                    f"Please connect the motor on {MOTOR_PORT}.\n\n{m}"
+                    f"Please connect the motor.\n\n{m}"
                 ),
             )
 
@@ -245,7 +244,7 @@ class InspectionGUI(tk.Tk):
         self.motor_light = tk.Canvas(motor_row, width=18, height=18, bg="#2a2a2a", highlightthickness=0)
         self.motor_light.pack(side="left")
         self.motor_light_dot = self.motor_light.create_oval(2, 2, 16, 16, fill="#dc2626", outline="")  # red default
-        self.motor_light_label = ttk.Label(motor_row, text=f"Not connected ({MOTOR_PORT})")
+        self.motor_light_label = ttk.Label(motor_row, text=f"Not connected")
         self.motor_light_label.pack(side="left", padx=(8, 0))
 
         # -------------------------
@@ -694,7 +693,7 @@ class InspectionGUI(tk.Tk):
 
 
 def main():
-    motion = MotionController(cfg=MotionConfig(port=MOTOR_PORT))
+    motion = MotionController(cfg=MotionConfig(port=None))
     camera = USBCCamera(device_index=CAMERA_INDEX)
 
     app = InspectionGUI(motion=motion, camera=camera)

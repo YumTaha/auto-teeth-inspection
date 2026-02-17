@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import serial
+from serial.tools import list_ports
 
 
 DONE_TOKEN = "DONE"
@@ -13,7 +14,7 @@ DONE_TOKEN = "DONE"
 
 @dataclass
 class MotionConfig:
-    port: str
+    port: Optional[str] = None
     baud: int = 115200
     connect_reset_delay_s: float = 2.0   # Arduino often resets on serial open
     read_timeout_s: float = 0.05         # serial read timeout
@@ -46,6 +47,10 @@ class MotionController:
     def connect(self) -> None:
         if self.is_connected:
             return
+
+        # Auto-detect port instead of using fixed COM
+        if not self.cfg.port:
+            self.cfg.port = self.find_esp_port()
 
         self._ser = serial.Serial(
             port=self.cfg.port,
@@ -127,6 +132,16 @@ class MotionController:
                 lines.append(txt)
 
         return lines
+
+    def find_esp_port(self) -> str:
+        TARGET_VID = 0x1A86
+        TARGET_PID = 0x55D4
+
+        for port in list_ports.comports():
+            if port.vid == TARGET_VID and port.pid == TARGET_PID:
+                return port.device
+
+        raise RuntimeError("ESP32 (CH340) not found")
 
     # --------- commands ---------
     def hold(self) -> None:
