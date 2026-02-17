@@ -130,15 +130,7 @@ def run_inspection(
 
     emit("Run complete.")
     
-    # Clean up temp directory if enabled (wait a bit for uploads to finish)
-    if cfg.cleanup_temp_files:
-        import time
-        emit("Waiting for uploads to complete before cleanup...")
-        time.sleep(2)  # Give uploads time to finish
-        try:
-            shutil.rmtree(run_dir)
-            emit(f"✓ Cleaned up temp directory: {run_dir}")
-        except Exception as e:
-            emit(f"⚠ Failed to cleanup temp directory: {e}")
+    # Note: Individual temp files are deleted after successful upload
+    # The temp directory itself is left for the OS to clean up
     
     return run_dir
