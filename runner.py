@@ -80,20 +80,20 @@ def run_inspection(
             break
 
         target_deg = index_to_angle_deg(i, cfg.teeth)
-        emit(f"Move {i}/{cfg.captures - 1}: {target_deg:.6f} deg")
+        emit(f"Move {i+1}/{cfg.captures}: {target_deg:.6f} deg")
 
         motion.move_abs(target_deg)
 
         ok = motion.wait_done(cfg.done_timeout_s, stop_flag=stop_flag)
         if not ok:
-            emit(f"WAIT DONE failed (timeout/stop) at index {i}.")
+            emit(f"WAIT DONE failed (timeout/stop) at move {i+1}.")
             break
 
         tooth_num = i + 1  # Tooth numbering starts at 1
         filename = f"tooth_{tooth_num:04d}_deg_{target_deg:.6f}.png"
         path = os.path.join(run_dir, filename)
 
-        emit(f"Capturing image {i}...")
+        emit(f"Capturing image {i+1}...")
         camera.capture_to(path)
         emit(f"✓ Saved: {filename}")
         

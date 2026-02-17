@@ -59,6 +59,9 @@ class MotionController:
             time.sleep(self.cfg.connect_reset_delay_s)
 
         self.drain()
+        
+        # Automatically release motor on connection
+        self.release()
 
     def close(self) -> None:
         if self._ser is not None:
