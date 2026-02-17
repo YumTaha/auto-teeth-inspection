@@ -130,33 +130,43 @@ class InspectionGUI(tk.Tk):
             self._motor_retry_job = None
 
         def tick():
+            # Skip monitoring during inspection to avoid serial port conflict
+            if self.is_running:
+                self._motor_retry_job = self.after(3000, tick)
+                return
+            
+            # Check actual motor connection status
+            is_actually_connected = self.motion.ping()
+            
+            # Update UI if connection status changed
+            if is_actually_connected != self.motor_connected:
+                self.motor_connected = is_actually_connected
+                if is_actually_connected:
+                    self._set_motor_light(True, "Connected")
+                else:
+                    self._set_motor_light(False, "Disconnected")
+                self._update_button_states()
+            
+            # Try to connect if disconnected
             if not self.motor_connected:
                 threading.Thread(target=self._motor_connect_worker, daemon=True).start()
                 self._motor_retry_job = self.after(MOTOR_RETRY_MS, tick)
             else:
-                self._motor_retry_job = None
+                # Keep monitoring even when connected (slower rate)
+                self._motor_retry_job = self.after(3000, tick)
 
         self._motor_retry_job = self.after(10, tick)
 
     def _motor_connect_worker(self):
         try:
-            if not self.motion.is_connected:
-                self.motion.connect()
-
-            self.motor_connected = True
-            self.after(0, lambda: self._set_motor_light(True, f"Connected"))
-            self.after(0, self._hide_motor_overlay)
-
-        except Exception as e:
-            self.motor_connected = False
-            err = str(e)
-            self.after(0, lambda: self._set_motor_light(False, f"Not connected"))
-            self.after(
-                0,
-                lambda m=err: self._show_motor_overlay(
-                    f"Please connect the motor.\n\n{m}"
-                ),
-            )
+            if not self.motion.ping():
+                self.motion.reconnect()
+            # verify it worked
+            ok = self.motion.ping()
+            if ok:
+                self.after(0, lambda: self._set_motor_light(True, "Connected"))
+        except Exception:
+            pass
 
     # -------------------------
     # UI setup
@@ -531,7 +541,11 @@ class InspectionGUI(tk.Tk):
             self.start_btn.config(state="normal", style="Danger.TButton", text="STOP")
             return
 
-        self.lock_btn.config(state="normal")
+        # Disable lock button if motor not connected
+        if not self.motor_connected:
+            self.lock_btn.config(state="disabled")
+        else:
+            self.lock_btn.config(state="normal")
 
         # Only enable start if: scan ok, blade locked, AND has test case
         if self.scan_ok and self.blade_locked and self.test_case_id is not None:

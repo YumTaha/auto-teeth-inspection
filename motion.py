@@ -83,6 +83,13 @@ class MotionController:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
+    def reconnect(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+        self.connect()
+
     # --------- io helpers ---------
     def drain(self) -> None:
         """Clear any pending input so old DONEs don't confuse us."""
@@ -142,6 +149,22 @@ class MotionController:
                 return port.device
 
         raise RuntimeError("ESP32 (CH340) not found")
+
+    def ping(self, timeout: float = 0.2) -> bool:
+        if not self.is_connected:
+            return False
+        try:
+            self._write_ascii("P\n")
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                for line in self._read_lines_nonblocking():
+                    if line == "PONG":
+                        return True
+                time.sleep(0.001)
+            return False
+        except Exception:
+            self.close()
+            return False
 
     # --------- commands ---------
     def hold(self) -> None:
