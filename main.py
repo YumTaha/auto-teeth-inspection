@@ -25,7 +25,6 @@ from api_client import (
 # ==============================
 # CONFIG (change here)
 # ==============================
-CAMERA_INDEX = 1          # <- change if wrong camera
 PREVIEW_FPS = 30
 SIDE_WIDTH = 320
 MOTOR_RETRY_MS = 1500     # retry motor connection every N ms
@@ -610,6 +609,11 @@ class InspectionGUI(tk.Tk):
                 
                 self._set_light(False, "Waiting for scan...")
                 self.instructions_var.set("SCAN QR CODE ON BLADE")
+
+                self.motion.release()  # ensure motor is released after run
+                # IMPORTANT: sync UI state with reality
+                self.blade_locked = False
+                self.lock_btn.config(text="LOCK BLADE")
                 
                 self._update_button_states()
                 self._refocus_qr()
@@ -694,7 +698,7 @@ class InspectionGUI(tk.Tk):
 
 def main():
     motion = MotionController(cfg=MotionConfig(port=None))
-    camera = USBCCamera(device_index=CAMERA_INDEX)
+    camera = USBCCamera()  # Auto-detect Dino-Lite camera
 
     app = InspectionGUI(motion=motion, camera=camera)
     app.mainloop()

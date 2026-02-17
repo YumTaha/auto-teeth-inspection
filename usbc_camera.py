@@ -8,6 +8,8 @@ import time
 import threading
 import platform
 
+from pygrabber.dshow_graph import FilterGraph
+
 
 class USBCCamera:
     """
@@ -18,7 +20,13 @@ class USBCCamera:
     Windows camera indicator flashing during resolution switching.
     """
 
-    def __init__(self, device_index: int = 1, width: int = 2560, height: int = 1920):
+    def __init__(self, device_index: Optional[int] = None, width: int = 2560, height: int = 1920):
+        # Auto-detect Dino-Lite camera if no index provided
+        if device_index is None:
+            device_index = self.find_external_camera()
+            if device_index is None:
+                raise RuntimeError("No Dino-Lite camera detected. Please ensure it's connected.")
+        
         self.device_index = device_index
         self._cap: Optional[cv2.VideoCapture] = None
         self._lock = threading.Lock()  # Prevent simultaneous access from preview and capture
@@ -26,6 +34,29 @@ class USBCCamera:
         # Resolution settings
         self.width = width
         self.height = height
+
+    @staticmethod
+    def find_external_camera() -> Optional[int]:
+        """
+        Find Dino-Lite camera by device name using DirectShow enumeration.
+        
+        Returns the camera index if found, None otherwise.
+        """
+        try:
+            devices = FilterGraph().get_input_devices()
+            for index, name in enumerate(devices):
+                # Match Dino-Lite camera by name (case-insensitive)
+                if "dino-lite" in name.lower() or "dinolite" in name.lower():
+                    print(f"[CAMERA] Detected Dino-Lite at index {index}: {name}")
+                    return index
+            
+            print("[CAMERA] No Dino-Lite camera found in available devices:")
+            for index, name in enumerate(devices):
+                print(f"  [{index}] {name}")
+        except Exception as e:
+            print(f"[CAMERA] pygrabber detection failed: {e}")
+        
+        return None
 
     @property
     def is_open(self) -> bool:

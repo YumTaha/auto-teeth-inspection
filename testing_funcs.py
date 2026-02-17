@@ -21,7 +21,7 @@ from usbc_camera import USBCCamera
 # ==============================
 # CONFIG (change here)
 # ==============================
-CAMERA_INDEX = 1          # <- change if wrong camera
+
 MOTOR_PORT = "COM9"       # <- change as needed
 PREVIEW_FPS = 30
 SIDE_WIDTH = 320
@@ -521,7 +521,7 @@ class InspectionGUI(tk.Tk):
 
 def main():
     motion = MotionController(cfg=MotionConfig(port=MOTOR_PORT))
-    camera = USBCCamera(device_index=CAMERA_INDEX)
+    camera = USBCCamera()  # Auto-detect Dino-Lite camera
 
     app = InspectionGUI(motion=motion, camera=camera)
     app.mainloop()
