@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime
@@ -20,6 +22,7 @@ class RunConfig:
     make_run_subfolder: bool = True
     observation_id: Optional[int] = None
     api_config: Optional[Any] = None
+    cleanup_temp_files: bool = False  # Delete files after successful upload
 
 
 # optional callback signature for UI/logging
@@ -51,18 +54,22 @@ def run_inspection(
     if cfg.captures <= 0:
         raise ValueError("cfg.captures must be > 0")
 
-    base = cfg.outdir
-    os.makedirs(base, exist_ok=True)
-
-    if cfg.make_run_subfolder:
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_dir = os.path.join(base, f"run_{stamp}")
+    # Use temp directory if cleanup is enabled, otherwise use configured outdir
+    if cfg.cleanup_temp_files:
+        run_dir = tempfile.mkdtemp(prefix="inspection_")
+        emit(f"Using temp dir: {run_dir}")
     else:
-        run_dir = base
+        base = cfg.outdir
+        os.makedirs(base, exist_ok=True)
 
-    os.makedirs(run_dir, exist_ok=True)
+        if cfg.make_run_subfolder:
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            run_dir = os.path.join(base, f"run_{stamp}")
+        else:
+            run_dir = base
 
-    emit(f"Run dir: {run_dir}")
+        os.makedirs(run_dir, exist_ok=True)
+        emit(f"Run dir: {run_dir}")
 
     # Make sure motor is holding before start
     motion.hold()
@@ -92,19 +99,27 @@ def run_inspection(
         
         # Upload to observation if configured (non-blocking)
         if cfg.observation_id is not None and cfg.api_config is not None:
-            def upload_worker(obs_id, api_cfg, file_path, tooth_number):
+            def upload_worker(obs_id, api_cfg, file_path, tooth_number, cleanup):
                 """Background worker to upload image without blocking."""
                 try:
                     client = ApiClient(api_cfg)
                     client.upload_attachment(obs_id, file_path, tag=tooth_number)
                     emit(f"✓ Uploaded tooth_{tooth_number} to observation")
+                    
+                    # Delete file after successful upload if cleanup is enabled
+                    if cleanup:
+                        try:
+                            os.remove(file_path)
+                            emit(f"✓ Deleted temp file: tooth_{tooth_number}")
+                        except Exception as del_err:
+                            emit(f"⚠ Failed to delete temp file tooth_{tooth_number}: {del_err}")
                 except Exception as e:
                     emit(f"⚠ Upload failed for tooth_{tooth_number}: {e}")
             
             # Start upload in background thread
             upload_thread = threading.Thread(
                 target=upload_worker,
-                args=(cfg.observation_id, cfg.api_config, path, tooth_num),
+                args=(cfg.observation_id, cfg.api_config, path, tooth_num, cfg.cleanup_temp_files),
                 daemon=True
             )
             upload_thread.start()
@@ -114,4 +129,16 @@ def run_inspection(
             on_image_captured(path)
 
     emit("Run complete.")
+    
+    # Clean up temp directory if enabled (wait a bit for uploads to finish)
+    if cfg.cleanup_temp_files:
+        import time
+        emit("Waiting for uploads to complete before cleanup...")
+        time.sleep(2)  # Give uploads time to finish
+        try:
+            shutil.rmtree(run_dir)
+            emit(f"✓ Cleaned up temp directory: {run_dir}")
+        except Exception as e:
+            emit(f"⚠ Failed to cleanup temp directory: {e}")
+    
     return run_dir
