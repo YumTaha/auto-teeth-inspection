@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import requests
 import urllib3
@@ -179,3 +180,101 @@ def api_config_from_env() -> ApiConfig:
     """
     base_url = os.getenv("MKMORSE_API_BASE_URL", "https://eng-ubuntu.mkmorse.local/api")
     return ApiConfig(base_url=base_url)
+
+
+def run_inspection_workflow(
+    test_case_id: int,
+    cut_number: Optional[int],
+    teeth_count: int,
+    motion,
+    camera,
+    stop_flag,
+    on_event: Optional[Callable[[str], None]] = None,
+    on_image_captured: Optional[Callable[[str], None]] = None,
+) -> str:
+    """
+    Complete inspection workflow with API integration.
+    
+    Handles:
+    - Observation creation
+    - Scope determination
+    - Response validation
+    - Inspection execution with temp file cleanup
+    
+    Args:
+        test_case_id: Test case ID from API context
+        cut_number: Cut number (None or 0 for incoming inspection)
+        teeth_count: Number of teeth to capture
+        motion: Motion controller instance
+        camera: Camera instance
+        stop_flag: Threading event for stopping inspection
+        on_event: Optional callback for logging events
+        on_image_captured: Optional callback for displaying captured images
+    
+    Returns:
+        Result directory path (temp dir)
+    """
+    from runner import run_inspection, RunConfig
+    
+    # Get API configuration
+    api_config = api_config_from_env()
+    client = ApiClient(api_config)
+    
+    # Determine scope
+    scope = "incoming" if (cut_number is None or cut_number == 0) else "cut"
+    
+    # Create observation
+    if on_event:
+        on_event(f"Creating observation for test case {test_case_id} (scope: {scope})...")
+    
+    if scope == "cut":
+        obs_response = client.create_observation(test_case_id, cut_number=cut_number, scope=scope)
+    else:
+        obs_response = client.create_observation(test_case_id, scope=scope)
+    
+    # Validate response
+    if obs_response is None:
+        raise ValueError("API returned None response")
+    if not isinstance(obs_response, dict):
+        raise ValueError(f"API returned unexpected type: {type(obs_response)}")
+    
+    observation_id = obs_response.get("id")
+    if observation_id is None:
+        raise ValueError(f"No 'id' in observation response: {obs_response}")
+    
+    if on_event:
+        on_event(f"✓ Created observation ID: {observation_id}")
+    
+    # Configure inspection run with temp file cleanup
+    config = RunConfig(
+        teeth=teeth_count,
+        captures=teeth_count,
+        outdir=tempfile.gettempdir(),
+        done_timeout_s=15.0,
+        make_run_subfolder=False,
+        observation_id=observation_id,
+        api_config=api_config,
+        cleanup_temp_files=True
+    )
+    
+    if on_event:
+        on_event("=" * 60)
+        on_event(f"Starting inspection: {teeth_count} captures")
+        on_event("=" * 60)
+    
+    # Run inspection
+    result_dir = run_inspection(
+        cfg=config,
+        motion=motion,
+        camera=camera,
+        stop_flag=stop_flag,
+        on_event=on_event,
+        on_image_captured=on_image_captured
+    )
+    
+    if on_event:
+        on_event("=" * 60)
+        on_event(f"✓ Inspection complete!")
+        on_event("=" * 60)
+    
+    return result_dir

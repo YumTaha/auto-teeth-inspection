@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -14,7 +13,6 @@ from PIL import Image, ImageTk
 
 from motion import MotionController, MotionConfig
 from usbc_camera import USBCCamera
-from runner import run_inspection, RunConfig
 from api_client import (
     ApiClient,
     api_config_from_env,
@@ -565,68 +563,24 @@ class InspectionGUI(tk.Tk):
             self.instructions_var.set("Stopping...")
 
     def _run_inspection_loop(self):
-        """Run inspection using runner.py with temp file cleanup."""
+        """Run inspection workflow - purely GUI orchestration."""
+        from api_client import run_inspection_workflow
+        
         try:
-            # Create observation via API
-            api_config = api_config_from_env()
-            client = ApiClient(api_config)
-            
-            # Determine scope
-            scope = "incoming" if (self.cut_number is None or self.cut_number == 0) else "cut"
-            
-            # Create observation
-            if scope == "cut":
-                self._log(f"Creating observation for test case {self.test_case_id} (scope: {scope}, cut: {self.cut_number})...")
-                obs_response = client.create_observation(self.test_case_id, cut_number=self.cut_number, scope=scope)
-            else:
-                self._log(f"Creating observation for test case {self.test_case_id} (scope: {scope})...")
-                obs_response = client.create_observation(self.test_case_id, scope=scope)
-            
-            # Validate response
-            if obs_response is None:
-                raise ValueError("API returned None response")
-            if not isinstance(obs_response, dict):
-                raise ValueError(f"API returned unexpected type: {type(obs_response)}")
-            
-            observation_id = obs_response.get("id")
-            if observation_id is None:
-                raise ValueError(f"No 'id' in observation response: {obs_response}")
-            
-            self.observation_id = observation_id
-            self._log(f"✓ Created observation ID: {observation_id}")
-            
             # Pause live preview during inspection
             self.preview_running = False
             
-            # Configure inspection run
-            config = RunConfig(
-                teeth=self.teeth_count,
-                captures=self.teeth_count,
-                outdir=tempfile.gettempdir(),  # Use system temp directory
-                done_timeout_s=15.0,
-                make_run_subfolder=False,  # Don't create subfolders in temp
-                observation_id=observation_id,
-                api_config=api_config,
-                cleanup_temp_files=True  # Delete files after upload
-            )
-
-            self._log("=" * 60)
-            self._log(f"Starting inspection: {self.teeth_count} captures")
-            self._log("=" * 60)
-
-            # Run inspection
-            result_dir = run_inspection(
-                cfg=config,
+            # Call business logic function (all API/workflow logic in api_client.py)
+            run_inspection_workflow(
+                test_case_id=self.test_case_id,
+                cut_number=self.cut_number,
+                teeth_count=self.teeth_count,
                 motion=self.motion,
                 camera=self.camera,
                 stop_flag=self.stop_flag,
                 on_event=self._log,
                 on_image_captured=self._display_captured_image
             )
-            
-            self._log("=" * 60)
-            self._log(f"✓ Inspection complete!")
-            self._log("=" * 60)
             
         except Exception as e:
             self._log(f"✗ Inspection failed: {e}")
