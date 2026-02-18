@@ -433,7 +433,7 @@ class InspectionGUI(tk.Tk):
             
             # Extract additional info
             sample_name = context.get("sample", {}).get("identifier", "-")
-            design_name = context.get("sample", {}).get("design", {}).get("name", "-")
+            #design_name = context.get("sample", {}).get("design", {}).get("name", "-")
             
             # Get blade count (total cuts + 1 for incoming)
             blade_count = (cut_number or 0) + 1
@@ -607,7 +607,7 @@ class InspectionGUI(tk.Tk):
 
     def _run_inspection_loop(self):
         """Run inspection workflow - purely GUI orchestration."""
-        from api_client import run_inspection_workflow
+        from api_client import run_inspection_workflow, DuplicateObservationError
         
         try:
             # Pause live preview during inspection
@@ -625,7 +625,19 @@ class InspectionGUI(tk.Tk):
                 on_image_captured=self._display_captured_image,
                 on_api_progress=lambda c, t, m, f: self.after(0, lambda: self._api_progress_update(c, t, m, f)),
             )
-            
+
+        except DuplicateObservationError as e:
+            self._log(f"✗ Duplicate observation: {e}")
+
+            def show_error():
+                messagebox.showerror(
+                    "Inspection Error",
+                    "This cut already has an observation with images.\n"
+                    "We can’t create a duplicate inspection.\n\n"
+                    "Try a different blade/cut, or remove the existing observation images."
+                )
+            self.after(0, show_error)
+
         except Exception as e:
             self._log(f"✗ Inspection failed: {e}")
             

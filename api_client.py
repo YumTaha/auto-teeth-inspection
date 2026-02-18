@@ -12,6 +12,10 @@ import urllib3
 # Disable SSL warnings for self-signed certificates
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+class DuplicateObservationError(Exception):
+    """Raised when an observation for the same cut already exists (duplicate unique constraint)."""
+    pass
+
 
 @dataclass
 class ApiConfig:
@@ -74,6 +78,15 @@ class ApiClient:
         
         r = requests.post(url, json=payload, headers=headers, timeout=10, verify=False)
         
+        # Friendly error for "duplicate observation" (unique constraint)
+        if r.status_code == 400:
+            body = (r.text or "").lower()
+            if "idx_observations_cut_unique" in body or "sqlstate 23505" in body or "duplicate key value" in body:
+                raise DuplicateObservationError(
+                    "This inspection already exists for this cut (duplicate). "
+                    "That observation already has images, so the system can’t create another one."
+                )
+
         print(f"[API] Response Status: {r.status_code}")
         print(f"[API] Response Headers: {dict(r.headers)}")
         print(f"[API] Response Content Length: {len(r.content)} bytes")
