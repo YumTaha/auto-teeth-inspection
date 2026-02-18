@@ -193,6 +193,12 @@ class InspectionGUI(tk.Tk):
 
         style.configure("Disabled.TButton", font=("Segoe UI", 12, "bold"), padding=(16, 12),
                         background="#3a3a3a", foreground="#9ca3af", borderwidth=0)
+        
+        style.configure("Green.Horizontal.TProgressbar", troughcolor="#5c5c5c", background="#16a34a", 
+                        bordercolor="#2a2a2a", lightcolor="#16a34a", darkcolor="#16a34a")
+        
+        style.configure("Yellow.Horizontal.TProgressbar", troughcolor="#5c5c5c", background="#eab308",
+                        bordercolor="#2a2a2a", lightcolor="#eab308", darkcolor="#eab308")
 
     def _build_layout(self):
         # root layout
@@ -233,6 +239,14 @@ class InspectionGUI(tk.Tk):
         ttk.Label(side, text="INSTRUCTIONS", style="Title.TLabel").pack(anchor="w", pady=(18, 6))
         self.instructions_var = tk.StringVar(value="SCAN QR CODE ON BLADE")
         ttk.Label(side, textvariable=self.instructions_var, wraplength=280).pack(anchor="w")
+
+        # API Progress
+        ttk.Label(side, text="PROGRESS", style="Title.TLabel").pack(anchor="w", pady=(18, 6))
+        self.api_progress_var = tk.StringVar(value="Waiting...")
+        ttk.Label(side, textvariable=self.api_progress_var, wraplength=280).pack(anchor="w", pady=(0, 6))
+        self.api_progress = ttk.Progressbar(side, mode="determinate", maximum=100, 
+                                            style="Green.Horizontal.TProgressbar")
+        self.api_progress.pack(fill="x", pady=(0, 6))
 
         # Scan status light
         ttk.Label(side, text="SCAN STATUS", style="Title.TLabel").pack(anchor="w", pady=(18, 6))
@@ -486,6 +500,25 @@ class InspectionGUI(tk.Tk):
         self.motor_light.itemconfig(self.motor_light_dot, fill=("#16a34a" if ok else "#dc2626"))
         self.motor_light_label.config(text=text)
 
+    def _api_progress_reset(self):
+        try:
+            self.api_progress["value"] = 0
+            self.api_progress.configure(style="Green.Horizontal.TProgressbar")
+            self.api_progress_var.set("Waiting...")
+        except Exception:
+            pass
+
+    def _api_progress_update(self, current: int, total: int, msg: str, had_failure: bool):
+        try:
+            pct = int((current / max(total, 1)) * 100)
+            self.api_progress["value"] = pct
+            self.api_progress_var.set(f"{pct}% — {msg}")
+            self.api_progress.configure(
+                style=("Yellow.Horizontal.TProgressbar" if had_failure else "Green.Horizontal.TProgressbar")
+            )
+        except Exception:
+            pass
+
     # -------------------------
     # Blade lock + run control
     # -------------------------
@@ -561,6 +594,8 @@ class InspectionGUI(tk.Tk):
             self.is_running = True
             self.stop_flag.clear()
 
+            self._api_progress_reset()
+
             self.instructions_var.set("Inspection running...")
             self._update_button_states()
 
@@ -568,10 +603,6 @@ class InspectionGUI(tk.Tk):
             self.run_thread.start()
         else:
             self.stop_flag.set()
-            try:
-                self.motion.stop()
-            except Exception:
-                pass
             self.instructions_var.set("Stopping...")
 
     def _run_inspection_loop(self):
@@ -591,7 +622,8 @@ class InspectionGUI(tk.Tk):
                 camera=self.camera,
                 stop_flag=self.stop_flag,
                 on_event=self._log,
-                on_image_captured=self._display_captured_image
+                on_image_captured=self._display_captured_image,
+                on_api_progress=lambda c, t, m, f: self.after(0, lambda: self._api_progress_update(c, t, m, f)),
             )
             
         except Exception as e:
@@ -623,6 +655,8 @@ class InspectionGUI(tk.Tk):
                 
                 self._set_light(False, "Waiting for scan...")
                 self.instructions_var.set("SCAN QR CODE ON BLADE")
+
+                self._api_progress_reset() # Reset progress bar
 
                 self.motion.release()  # ensure motor is released after run
                 # IMPORTANT: sync UI state with reality

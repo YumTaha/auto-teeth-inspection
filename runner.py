@@ -28,6 +28,7 @@ class RunConfig:
 # optional callback signature for UI/logging
 EventCb = Optional[Callable[[str], None]]
 ImageCb = Optional[Callable[[str], None]]  # Callback for displaying captured images
+UploadCb = Optional[Callable[[int, bool, Optional[str]], None]]  # (tooth_number, ok, err)
 
 
 def run_inspection(
@@ -37,6 +38,7 @@ def run_inspection(
     stop_flag=None,
     on_event: EventCb = None,
     on_image_captured: ImageCb = None,
+    on_upload_result: UploadCb = None,
 ) -> str:
     """
     Returns the folder where images were saved.
@@ -105,6 +107,8 @@ def run_inspection(
                     client = ApiClient(api_cfg)
                     client.upload_attachment(obs_id, file_path, tag=tooth_number)
                     emit(f"✓ Uploaded tooth_{tooth_number} to observation")
+                    if on_upload_result:
+                        on_upload_result(tooth_number, True, None)
                     
                     # Delete file after successful upload if cleanup is enabled
                     if cleanup:
@@ -115,7 +119,9 @@ def run_inspection(
                             emit(f"⚠ Failed to delete temp file tooth_{tooth_number}: {del_err}")
                 except Exception as e:
                     emit(f"⚠ Upload failed for tooth_{tooth_number}: {e}")
-            
+                    if on_upload_result:
+                        on_upload_result(tooth_number, False, str(e))
+                        
             # Start upload in background thread
             upload_thread = threading.Thread(
                 target=upload_worker,

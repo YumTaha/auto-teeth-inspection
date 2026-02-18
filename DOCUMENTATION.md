@@ -14,15 +14,15 @@ The Auto Teeth Inspection System is a Python-based application designed for auto
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         main.py                              │
-│                  (GUI Application / Controller)               │
-│                                                               │
+┌────────────────────────────────────────────────────────────┐
+│                         main.py                            │
+│               (GUI Application / Controller)               │
+│                                                            │
 │  ┌─────────────┐  ┌──────────────┐  ┌──────────────┐       │
 │  │  Config UI  │  │  Controls UI │  │  Preview UI  │       │
 │  │  + QR Scan  │  │              │  │              │       │
 │  └─────────────┘  └──────────────┘  └──────────────┘       │
-└─────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────┘
          │                    │                    │
          ├────────────────────┼────────────────────┼────────────┐
          │                    │                    │            │
@@ -35,13 +35,13 @@ The Auto Teeth Inspection System is a Python-based application designed for auto
     │          │       │ Background │      │            │ │  Observe  │
     │          │       │  Uploads   │      │            │ │  Upload   │
     └────┬─────┘       └─────┬──────┘      └─────┬──────┘ └──┬────────┘
-         │                    │                    │            │
+         │                   │                   │           │
     ┌────▼─────┐       ┌─────▼──────┐      ┌─────▼──────┐ ┌──▼────────┐
     │ Arduino  │       │kinematics  │      │  OpenCV /  │ │ M.K.Morse │
     │ via      │       │    .py     │      │  Physical  │ │  Testing  │
     │ Serial   │       │            │      │   Camera   │ │    API    │
     │USB/COM   │       │ Angle Math │      └────────────┘ │  (HTTPS)  │
-    └──────────┘       └────────────┘                      └───────────┘
+    └──────────┘       └────────────┘                     └───────────┘
 ```
 
 ## File Descriptions

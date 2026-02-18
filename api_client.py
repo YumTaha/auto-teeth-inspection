@@ -191,6 +191,7 @@ def run_inspection_workflow(
     stop_flag,
     on_event: Optional[Callable[[str], None]] = None,
     on_image_captured: Optional[Callable[[str], None]] = None,
+    on_api_progress: Optional[Callable[[int, int, str, bool], None]] = None,  # (current, total, msg, had_failure)
 ) -> str:
     """
     Complete inspection workflow with API integration.
@@ -223,6 +224,16 @@ def run_inspection_workflow(
     # Determine scope
     scope = "incoming" if (cut_number is None or cut_number == 0) else "cut"
     
+    total_steps = 1 + int(teeth_count)  # 1 for observation + N uploads
+    current_step = 0
+    had_failure = False
+
+    def api_step(msg: str):
+        nonlocal current_step
+        current_step += 1
+        if on_api_progress:
+            on_api_progress(current_step, total_steps, msg, had_failure)
+            
     # Create observation
     if on_event:
         on_event(f"Creating observation for test case {test_case_id} (scope: {scope})...")
@@ -242,6 +253,8 @@ def run_inspection_workflow(
     if observation_id is None:
         raise ValueError(f"No 'id' in observation response: {obs_response}")
     
+    api_step(f"Observation created (ID {observation_id})")
+
     if on_event:
         on_event(f"✓ Created observation ID: {observation_id}")
     
@@ -263,14 +276,22 @@ def run_inspection_workflow(
         on_event("=" * 60)
     
     # Run inspection
+    def upload_result_cb(tooth_number: int, ok: bool, err: Optional[str]):
+        nonlocal had_failure
+        if not ok:
+            had_failure = True
+        api_step(f"Tooth {tooth_number} {'uploaded' if ok else 'failed'}")
+
     result_dir = run_inspection(
         cfg=config,
         motion=motion,
         camera=camera,
         stop_flag=stop_flag,
         on_event=on_event,
-        on_image_captured=on_image_captured
+        on_image_captured=on_image_captured,
+        on_upload_result=upload_result_cb,
     )
+
     
     if on_event:
         on_event("=" * 60)
