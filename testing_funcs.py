@@ -27,6 +27,9 @@ PREVIEW_FPS = 30
 SIDE_WIDTH = 320
 MOTOR_RETRY_MS = 1500     # retry motor connection every N ms
 BYPASS_MOTOR = True  # True = don’t show overlay / don’t retry connect
+GUIDE_RECT_W = 200
+GUIDE_RECT_H = 500
+GUIDE_RECT_THICKNESS = 2
 # ==============================
 
 
@@ -176,6 +179,10 @@ class InspectionGUI(tk.Tk):
         style.configure("Primary.TButton", font=("Segoe UI", 12, "bold"), padding=(16, 12),
                         background="#2563eb", foreground="#ffffff", borderwidth=0)
         style.map("Primary.TButton", background=[("active", "#1d4ed8")])
+
+        style.configure("LightNeutral.TButton", font=("Segoe UI", 12, "bold"), padding=(16, 12),
+                        background="#5a5a5a", foreground="#ffffff", borderwidth=0)
+        style.map("LightNeutral.TButton", background=[("active", "#6a6a6a")])
 
         style.configure("Danger.TButton", font=("Segoe UI", 12, "bold"), padding=(16, 12),
                         background="#dc2626", foreground="#ffffff", borderwidth=0)
@@ -352,6 +359,15 @@ class InspectionGUI(tk.Tk):
 
                 frame_resized = cv2.resize(frame_rgb, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
+                # ---- Center guide rectangle (preview only) ----
+                cx, cy = target_w // 2, target_h // 2
+                x1 = max(0, cx - GUIDE_RECT_W // 2)
+                y1 = max(0, cy - GUIDE_RECT_H // 2)
+                x2 = min(target_w - 1, cx + GUIDE_RECT_W // 2)
+                y2 = min(target_h - 1, cy + GUIDE_RECT_H // 2)
+
+                cv2.rectangle(frame_resized, (x1, y1), (x2, y2), (0, 255, 0), GUIDE_RECT_THICKNESS)
+
                 img = Image.fromarray(frame_resized)
                 photo = ImageTk.PhotoImage(img)
 
@@ -429,6 +445,7 @@ class InspectionGUI(tk.Tk):
 
         self.blade_locked = not self.blade_locked
         self.lock_btn.config(text=("RELEASE BLADE" if self.blade_locked else "LOCK BLADE"))
+        self.lock_btn.config(style=("Neutral.TButton" if self.blade_locked else "LightNeutral.TButton"))
 
         if not self.scan_ok:
             self.instructions_var.set("SCAN QR CODE ON BLADE")
@@ -521,7 +538,7 @@ class InspectionGUI(tk.Tk):
 
 def main():
     motion = MotionController(cfg=MotionConfig(port=MOTOR_PORT))
-    camera = USBCCamera()  # Auto-detect Dino-Lite camera
+    camera = USBCCamera(device_index=0)  # Auto-detect Dino-Lite camera
 
     app = InspectionGUI(motion=motion, camera=camera)
     app.mainloop()

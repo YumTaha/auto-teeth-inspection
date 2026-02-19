@@ -28,6 +28,9 @@ from api_client import (
 PREVIEW_FPS = 30
 SIDE_WIDTH = 320
 MOTOR_RETRY_MS = 1500     # retry motor connection every N ms
+GUIDE_RECT_W = 200
+GUIDE_RECT_H = 500
+GUIDE_RECT_THICKNESS = 2
 # ==============================
 
 
@@ -188,8 +191,12 @@ class InspectionGUI(tk.Tk):
         style.map("Danger.TButton", background=[("active", "#b91c1c")])
 
         style.configure("Neutral.TButton", font=("Segoe UI", 12, "bold"), padding=(16, 12),
-                        background="#404040", foreground="#ffffff", borderwidth=0)
+                        background="#2a2a2a", foreground="#ffffff", borderwidth=0)
         style.map("Neutral.TButton", background=[("active", "#525252")])
+
+        style.configure("LightNeutral.TButton", font=("Segoe UI", 12, "bold"), padding=(16, 12),
+                        background="#343434", foreground="#ffffff", borderwidth=0)
+        style.map("LightNeutral.TButton", background=[("active", "#6a6a6a")])
 
         style.configure("Disabled.TButton", font=("Segoe UI", 12, "bold"), padding=(16, 12),
                         background="#3a3a3a", foreground="#9ca3af", borderwidth=0)
@@ -375,6 +382,14 @@ class InspectionGUI(tk.Tk):
 
                 frame_resized = cv2.resize(frame_rgb, (target_w, target_h), interpolation=cv2.INTER_AREA)
 
+                # ---- Center guide rectangle (preview only) ----
+                cx, cy = target_w // 2, target_h // 2
+                x1 = max(0, cx - GUIDE_RECT_W // 2)
+                y1 = max(0, cy - GUIDE_RECT_H // 2)
+                x2 = min(target_w - 1, cx + GUIDE_RECT_W // 2)
+                y2 = min(target_h - 1, cy + GUIDE_RECT_H // 2)
+                cv2.rectangle(frame_resized, (x1, y1), (x2, y2), (0, 255, 0), GUIDE_RECT_THICKNESS)
+
                 img = Image.fromarray(frame_resized)
                 photo = ImageTk.PhotoImage(img)
 
@@ -512,7 +527,7 @@ class InspectionGUI(tk.Tk):
         try:
             pct = int((current / max(total, 1)) * 100)
             self.api_progress["value"] = pct
-            self.api_progress_var.set(f"{pct}% — {msg}")
+            self.api_progress_var.set(f"{pct}% - {msg}")
             self.api_progress.configure(
                 style=("Yellow.Horizontal.TProgressbar" if had_failure else "Green.Horizontal.TProgressbar")
             )
@@ -539,12 +554,12 @@ class InspectionGUI(tk.Tk):
                 self._log(f"⚠ Motor lock failed: {e}")
                 messagebox.showerror("Error", f"Failed to lock motor: {e}")
                 self.blade_locked = False  # Revert state
-                self.lock_btn.config(text="LOCK BLADE")
+                self.lock_btn.config(text="LOCK BLADE", style="Neutral.TButton")
                 self._update_button_states()
                 self._refocus_qr()
                 return
             
-            self.lock_btn.config(text="RELEASE BLADE")
+            self.lock_btn.config(text="RELEASE BLADE", style="LightNeutral.TButton")
         else:
             # Release: release the motor
             try:
@@ -553,7 +568,7 @@ class InspectionGUI(tk.Tk):
             except Exception as e:
                 self._log(f"⚠ Motor release failed: {e}")
             
-            self.lock_btn.config(text="LOCK BLADE")
+            self.lock_btn.config(text="LOCK BLADE", style="Neutral.TButton")
 
         # Update instructions
         if not self.scan_ok:

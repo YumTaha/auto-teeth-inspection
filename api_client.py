@@ -237,9 +237,12 @@ def run_inspection_workflow(
     # Determine scope
     scope = "incoming" if (cut_number is None or cut_number == 0) else "cut"
     
-    total_steps = 1 + int(teeth_count)  # 1 for observation + N uploads
+    teeth_total = int(teeth_count)
+    total_steps = 1 + int(teeth_total)  # 1 for observation + N uploads
     current_step = 0
     had_failure = False
+    uploaded_count = 0
+    failed_count = 0
 
     def api_step(msg: str):
         nonlocal current_step
@@ -290,10 +293,19 @@ def run_inspection_workflow(
     
     # Run inspection
     def upload_result_cb(tooth_number: int, ok: bool, err: Optional[str]):
-        nonlocal had_failure
-        if not ok:
+        nonlocal had_failure, uploaded_count, failed_count
+
+        if ok:
+            uploaded_count += 1
+        else:
+            failed_count += 1
             had_failure = True
-        api_step(f"Tooth {tooth_number} {'uploaded' if ok else 'failed'}")
+
+        msg = f"Uploaded {uploaded_count} / {teeth_total} teeth"
+        if failed_count:
+            msg += f"  ({failed_count} failed)"
+
+        api_step(msg)
 
     result_dir = run_inspection(
         cfg=config,
