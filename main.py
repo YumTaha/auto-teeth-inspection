@@ -13,6 +13,7 @@ from PIL import Image, ImageTk
 
 from motion import MotionController, MotionConfig
 from usbc_camera import USBCCamera
+from basler import BaslerCamera, BaslerConfig
 from api_client import (
     ApiClient,
     api_config_from_env,
@@ -60,7 +61,6 @@ class InspectionGUI(tk.Tk):
         self.sample_context: Optional[dict] = None
         self.test_case_id: Optional[int] = None
         self.cut_number: Optional[int] = None
-        self.observation_id: Optional[int] = None
         self.teeth_count: int = 72  # default
 
         # camera preview
@@ -773,7 +773,7 @@ class InspectionGUI(tk.Tk):
 
 def main():
     motion = MotionController(cfg=MotionConfig(port=None))
-    camera = USBCCamera()  # Auto-detect Dino-Lite camera
+    camera = BaslerCamera(BaslerConfig(serial_number=None))
 
     app = InspectionGUI(motion=motion, camera=camera)
     app.mainloop()

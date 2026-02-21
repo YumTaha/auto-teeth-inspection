@@ -87,7 +87,7 @@ class USBCCamera:
             finally:
                 self._cap = None
 
-    def capture_to(self, filepath: str, timeout_ms: int = 2000) -> None:
+    def capture_to(self, filepath: str) -> None:
         if not self.is_open:
             raise RuntimeError("USB-C camera not open.")
 
@@ -121,55 +121,3 @@ class USBCCamera:
 
         with self._lock:
             return self._cap.read()
-
-    def __enter__(self) -> "USBCCamera":
-        self.open()
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.close()
-
-    @staticmethod
-    def list_available_cameras(max_index: int = 5) -> list[int]:
-        """
-        Test camera indices 0 through max_index-1 and return list of working indices.
-        Stops early after 2 consecutive failures to reduce noise.
-        """
-        # Suppress OpenCV warnings during detection (if supported)
-        old_log_level = None
-        try:
-            if hasattr(cv2, 'getLogLevel'):
-                old_log_level = cv2.getLogLevel()
-                cv2.setLogLevel(cv2.LOG_LEVEL_ERROR)
-        except:
-            pass
-        
-        available = []
-        consecutive_failures = 0
-        
-        try:
-            for i in range(max_index):
-                # Use DirectShow on Windows for detection
-                if platform.system() == 'Windows':
-                    cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
-                else:
-                    cap = cv2.VideoCapture(i)
-                    
-                if cap.isOpened():
-                    available.append(i)
-                    consecutive_failures = 0
-                    cap.release()
-                else:
-                    consecutive_failures += 1
-                    # Stop after 2 consecutive failures to avoid noise
-                    if consecutive_failures >= 2:
-                        break
-        finally:
-            # Restore log level if it was set
-            if old_log_level is not None:
-                try:
-                    cv2.setLogLevel(old_log_level)
-                except:
-                    pass
-        
-        return available

@@ -63,7 +63,7 @@ class MotionController:
         if self.cfg.connect_reset_delay_s > 0:
             time.sleep(self.cfg.connect_reset_delay_s)
 
-        self.drain()
+        self._drain()
         
         # Automatically release motor on connection
         self.release()
@@ -76,13 +76,6 @@ class MotionController:
                 self._ser = None
                 self._rx_buf.clear()
 
-    def __enter__(self) -> "MotionController":
-        self.connect()
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.close()
-
     def reconnect(self) -> None:
         try:
             self.close()
@@ -91,7 +84,7 @@ class MotionController:
         self.connect()
 
     # --------- io helpers ---------
-    def drain(self) -> None:
+    def _drain(self) -> None:
         """Clear any pending input so old DONEs don't confuse us."""
         if not self.is_connected:
             return
