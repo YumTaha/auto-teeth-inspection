@@ -12,8 +12,7 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from motion import MotionController, MotionConfig
-from usbc_camera import USBCCamera
-from basler import BaslerCamera, BaslerConfig
+from camera import USBCCamera, BaslerCamera, BaslerConfig
 from api_client import (
     ApiClient,
     api_config_from_env,
@@ -32,6 +31,7 @@ MOTOR_RETRY_MS = 1500     # retry motor connection every N ms
 GUIDE_RECT_W = 200
 GUIDE_RECT_H = 500
 GUIDE_RECT_THICKNESS = 2
+CAMERA = "USB-C CAMERA"  # "BASLER CAMERA" or "USB-C CAMERA"
 # ==============================
 
 
@@ -773,7 +773,11 @@ class InspectionGUI(tk.Tk):
 
 def main():
     motion = MotionController(cfg=MotionConfig(port=None))
-    camera = BaslerCamera(BaslerConfig(serial_number=None))
+    
+    camera = (
+        USBCCamera()
+        if CAMERA == "USB-C CAMERA"
+        else BaslerCamera(BaslerConfig(serial_number=None)))
 
     app = InspectionGUI(motion=motion, camera=camera)
     app.mainloop()

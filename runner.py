@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -121,7 +120,7 @@ def run_inspection(
                     emit(f"⚠ Upload failed for tooth_{tooth_number}: {e}")
                     if on_upload_result:
                         on_upload_result(tooth_number, False, str(e))
-                        
+
             # Start upload in background thread
             upload_thread = threading.Thread(
                 target=upload_worker,
