@@ -1,4 +1,4 @@
-# test.py
+# main.py
 from __future__ import annotations
 
 import json
@@ -19,6 +19,7 @@ from api_client import (
     extract_teeth_from_context,
     extract_test_case_id_from_context,
     extract_cut_number_from_context,
+    DuplicateObservationError,
 )
 
 
@@ -622,14 +623,14 @@ class InspectionGUI(tk.Tk):
 
     def _run_inspection_loop(self):
         """Run inspection workflow - purely GUI orchestration."""
-        from api_client import run_inspection_workflow, DuplicateObservationError
+        from workflow import run_inspection_with_api
         
         try:
             # Pause live preview during inspection
             self.preview_running = False
             
-            # Call business logic function (all API/workflow logic in api_client.py)
-            run_inspection_workflow(
+            # Call workflow function (combines API + runner)
+            run_inspection_with_api(
                 test_case_id=self.test_case_id,
                 cut_number=self.cut_number,
                 teeth_count=self.teeth_count,
@@ -648,7 +649,7 @@ class InspectionGUI(tk.Tk):
                 messagebox.showerror(
                     "Inspection Error",
                     "This cut already has an observation with images.\n"
-                    "We can’t create a duplicate inspection.\n\n"
+                    "We can't create a duplicate inspection.\n\n"
                     "Try a different blade/cut, or remove the existing observation images."
                 )
             self.after(0, show_error)
