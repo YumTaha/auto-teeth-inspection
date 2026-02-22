@@ -8,6 +8,7 @@ This is the ONLY module that imports both - it acts as the "glue" layer.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import threading
 from typing import Callable, Optional
@@ -65,13 +66,17 @@ def run_inspection_with_api(
     had_failure = False
     uploaded_count = 0
     failed_count = 0
+    
+    # Thread safety for counter updates from background upload threads
+    progress_lock = threading.Lock()
 
     def api_step(msg: str):
         """Helper to update API progress."""
         nonlocal current_step
-        current_step += 1
-        if on_api_progress:
-            on_api_progress(current_step, total_steps, msg, had_failure)
+        with progress_lock:  # Thread-safe increment
+            current_step += 1
+            if on_api_progress:
+                on_api_progress(current_step, total_steps, msg, had_failure)
     
     # Step 1: Create observation via API
     if on_event:
@@ -115,8 +120,9 @@ def run_inspection_with_api(
                 if on_event:
                     on_event(f"✓ Uploaded tooth_{tooth_number} to observation")
                 
-                # Update success counter
-                uploaded_count += 1
+                # Update success counter (thread-safe)
+                with progress_lock:
+                    uploaded_count += 1
                 
                 # Delete temp file after successful upload
                 try:
@@ -128,28 +134,33 @@ def run_inspection_with_api(
                         on_event(f"⚠ Failed to delete temp file tooth_{tooth_number}: {del_err}")
                 
             except Exception as e:
-                # Update failure counter
-                failed_count += 1
-                had_failure = True
+                # Update failure counter (thread-safe)
+                with progress_lock:
+                    failed_count += 1
+                    had_failure = True
                 if on_event:
                     on_event(f"⚠ Upload failed for tooth_{tooth_number}: {e}")
             
-            # Update progress
-            msg = f"Uploaded {uploaded_count} / {teeth_total} teeth"
-            if failed_count:
-                msg += f"  ({failed_count} failed)"
+            # Update progress (thread-safe)
+            with progress_lock:
+                msg = f"Uploaded {uploaded_count} / {teeth_total} teeth"
+                if failed_count:
+                    msg += f"  ({failed_count} failed)"
             api_step(msg)
         
         # Start upload in background thread
         threading.Thread(target=upload_worker, daemon=True).start()
     
-    # Step 3: Configure inspection run
+    # Step 3: Configure inspection run with unique temp directory
+    # Use unique temp directory to prevent image overwrites on retries
+    temp_dir = tempfile.mkdtemp(prefix="inspection_")
+    
     config = RunConfig(
         teeth=teeth_count,
         captures=teeth_count,
-        outdir=tempfile.gettempdir(),  # Use temp directory
+        outdir=temp_dir,  # Unique temp directory per inspection
         done_timeout_s=15.0,
-        make_run_subfolder=False,
+        make_run_subfolder=False,  # Already unique
     )
     
     if on_event:

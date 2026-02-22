@@ -66,9 +66,12 @@ class InspectionGUI(tk.Tk):
 
         # camera preview
         self.preview_running = False
-        self._last_photo = None        
+        self._last_photo = None
+        
         # Progress tracking
         self._last_api_pct = 0
+        self._current_run_id = 0  # Prevents stale upload threads from corrupting UI
+
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_styles()
@@ -111,16 +114,6 @@ class InspectionGUI(tk.Tk):
         ttk.Button(card, text="Retry", command=self._retry_motor_connect_once).pack()
 
         # start hidden
-        self.motor_overlay.place_forget()
-
-    def _show_motor_overlay(self, msg: str | None = None):
-        if msg:
-            self.motor_overlay_msg.config(text=msg)
-        self.motor_overlay.place(x=0, y=0, relwidth=1, relheight=1)
-        self.motor_overlay.lift()
-        self.motor_overlay.focus_set()
-
-    def _hide_motor_overlay(self):
         self.motor_overlay.place_forget()
 
     def _retry_motor_connect_once(self):
@@ -170,8 +163,8 @@ class InspectionGUI(tk.Tk):
             ok = self.motion.ping()
             if ok:
                 self.after(0, lambda: self._set_motor_light(True, "Connected"))
-        except Exception:
-            pass
+        except Exception as e:
+            self._log(f"⚠ Motor connect failed: {e}")
 
     # -------------------------
     # UI setup
@@ -528,10 +521,14 @@ class InspectionGUI(tk.Tk):
             self.api_progress["value"] = 0
             self.api_progress.configure(style="Green.Horizontal.TProgressbar")
             self.api_progress_var.set("Waiting...")
-        except Exception:
-            pass
+        except Exception as e:
+            self._log(f"⚠ Progress reset failed: {e}")
 
-    def _api_progress_update(self, current: int, total: int, msg: str, had_failure: bool):
+    def _api_progress_update(self, current: int, total: int, msg: str, had_failure: bool, run_id: int):
+        # Ignore updates from old runs (stale background upload threads)
+        if run_id != self._current_run_id:
+            return
+        
         try:
             pct = int((current / max(total, 1)) * 100)
             self._last_api_pct = pct  # Store for reliable access
@@ -540,8 +537,8 @@ class InspectionGUI(tk.Tk):
             self.api_progress.configure(
                 style=("Yellow.Horizontal.TProgressbar" if had_failure else "Green.Horizontal.TProgressbar")
             )
-        except Exception:
-            pass
+        except Exception as e:
+            self._log(f"⚠ Progress update failed: {e}")
 
     # -------------------------
     # Blade lock + run control
@@ -620,17 +617,21 @@ class InspectionGUI(tk.Tk):
 
             self._api_progress_reset()
 
+            # Increment run ID to invalidate stale upload callbacks
+            self._current_run_id += 1
+            current_run = self._current_run_id
+
             self.instructions_var.set("Inspection running...")
             self._update_button_states()
 
-            self.run_thread = threading.Thread(target=self._run_inspection_loop, daemon=True)
+            self.run_thread = threading.Thread(target=self._run_inspection_loop, args=(current_run,), daemon=True)
             self.run_thread.start()
         else:
             self.stop_flag.set()
             self.start_btn.config(state="disabled")  # Prevent multiple clicks
             self.instructions_var.set("Stopping...")
 
-    def _run_inspection_loop(self):
+    def _run_inspection_loop(self, run_id: int):
         """Run inspection workflow - purely GUI orchestration."""
         from workflow import run_inspection_with_api
         
@@ -650,7 +651,7 @@ class InspectionGUI(tk.Tk):
                 stop_flag=self.stop_flag,
                 on_event=self._log,
                 on_image_captured=self._display_captured_image,
-                on_api_progress=lambda c, t, m, f: self.after(0, lambda: self._api_progress_update(c, t, m, f)),
+                on_api_progress=lambda c, t, m, f: self.after(0, lambda: self._api_progress_update(c, t, m, f, run_id)),
             )
 
         except DuplicateObservationError as e:
