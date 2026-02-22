@@ -5,7 +5,7 @@ import json
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Optional
+from typing import Optional, Protocol
 
 import cv2
 import numpy as np
@@ -21,6 +21,35 @@ from api_client import (
     extract_cut_number_from_context,
     DuplicateObservationError,
 )
+from workflow import cleanup_old_inspection_temp_dirs
+
+
+# ==============================
+# Camera Interface Protocol
+# ==============================
+class CameraLike(Protocol):
+    """Duck-typed interface for camera implementations."""
+    
+    @property
+    def is_open(self) -> bool:
+        """Check if camera is open."""
+        ...
+    
+    def open(self) -> None:
+        """Open camera connection."""
+        ...
+    
+    def close(self) -> None:
+        """Close camera connection."""
+        ...
+    
+    def read_frame(self) -> tuple[bool, Optional[np.ndarray]]:
+        """Read a frame from camera. Returns (success, frame_array)."""
+        ...
+    
+    def capture_to(self, filepath: str) -> None:
+        """Capture image and save to filepath."""
+        ...
 
 
 # ==============================
@@ -37,7 +66,7 @@ CAMERA = "USB-C CAMERA"  # "BASLER CAMERA" or "USB-C CAMERA"
 
 
 class InspectionGUI(tk.Tk):
-    def __init__(self, motion: MotionController, camera: USBCCamera):
+    def __init__(self, motion: MotionController, camera: CameraLike):
         super().__init__()
         self.title("AUTO TOOTH INSPECTION")
         self.configure(bg="#1f1f1f")
@@ -318,6 +347,9 @@ class InspectionGUI(tk.Tk):
 
             # Always refocus QR
             self.after(0, self._refocus_qr)
+            
+            # Schedule temp directory cleanup (start after 60 seconds)
+            self.after(60000, self._schedule_temp_cleanup)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -697,6 +729,22 @@ class InspectionGUI(tk.Tk):
 
             self.after(0, done)
 
+    def _schedule_temp_cleanup(self):
+        """Schedule periodic cleanup of old inspection temp directories."""
+        def cleanup_worker():
+            deleted = cleanup_old_inspection_temp_dirs(
+                max_age_hours=24,
+                on_event=self._log
+            )
+            if deleted > 0:
+                self._log(f"🧹 Cleaned up {deleted} old temp directories")
+        
+        # Run cleanup in background thread
+        threading.Thread(target=cleanup_worker, daemon=True).start()
+        
+        # Schedule next cleanup in 6 hours
+        self.after(6 * 60 * 60 * 1000, self._schedule_temp_cleanup)
+    
     def _display_captured_image(self, filepath: str):
         """Display a captured image in the preview (thread-safe)."""
         def update():

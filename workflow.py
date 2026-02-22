@@ -11,10 +11,98 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 from typing import Callable, Optional
 
 from runner import run_inspection, RunConfig
 from api_client import ApiClient, api_config_from_env
+
+
+def cleanup_old_inspection_temp_dirs(
+    prefix: str = "inspection_",
+    max_age_hours: float = 24,
+    on_event: Optional[Callable[[str], None]] = None
+) -> int:
+    """
+    Clean up old inspection temp directories to prevent disk buildup.
+    
+    Scans the system temp directory for folders starting with `prefix` and deletes
+    those older than `max_age_hours`. Includes safety checks to avoid deleting
+    active inspections.
+    
+    Args:
+        prefix: Directory name prefix to match (default: "inspection_")
+        max_age_hours: Maximum age in hours before deletion (default: 24)
+        on_event: Optional callback for logging events
+    
+    Returns:
+        Number of directories successfully deleted
+    
+    Safety features:
+        - Skips directories less than 5 minutes old (likely active)
+        - Handles permission errors gracefully
+        - Logs detailed information about deleted directories
+    """
+    try:
+        temp_root = tempfile.gettempdir()
+        now = time.time()
+        max_age_seconds = max_age_hours * 3600
+        min_age_seconds = 300  # 5 minutes safety window
+        
+        deleted_dirs = []
+        skipped_active = []
+        failed_dirs = []
+        
+        # Scan temp directory for matching folders
+        for dirname in os.listdir(temp_root):
+            if not dirname.startswith(prefix):
+                continue
+            
+            full_path = os.path.join(temp_root, dirname)
+            
+            # Only process directories
+            if not os.path.isdir(full_path):
+                continue
+            
+            try:
+                # Get directory modification time
+                mtime = os.path.getmtime(full_path)
+                age_seconds = now - mtime
+                
+                # Safety: Skip very recent directories (likely active inspections)
+                if age_seconds < min_age_seconds:
+                    skipped_active.append(dirname)
+                    continue
+                
+                # Delete if older than threshold
+                if age_seconds > max_age_seconds:
+                    shutil.rmtree(full_path)
+                    deleted_dirs.append(dirname)
+                    
+            except (OSError, PermissionError) as e:
+                failed_dirs.append((dirname, str(e)))
+        
+        # Log results
+        if on_event:
+            if deleted_dirs:
+                # Show first 3 deleted directories
+                preview = deleted_dirs[:3]
+                more = f" (+{len(deleted_dirs) - 3} more)" if len(deleted_dirs) > 3 else ""
+                on_event(f"🧹 Deleted old temp dirs: {', '.join(preview)}{more}")
+            
+            if skipped_active:
+                on_event(f"🔒 Skipped {len(skipped_active)} recent dirs (active inspections)")
+            
+            if failed_dirs:
+                for dirname, error in failed_dirs[:2]:  # Show first 2 failures
+                    on_event(f"⚠ Failed to delete {dirname}: {error}")
+        
+        return len(deleted_dirs)
+        
+    except (OSError, PermissionError) as e:
+        if on_event:
+            on_event(f"⚠ Temp cleanup failed: {e}")
+        return 0
 
 
 def run_inspection_with_api(
