@@ -66,8 +66,9 @@ class InspectionGUI(tk.Tk):
 
         # camera preview
         self.preview_running = False
-        self._last_photo = None
-
+        self._last_photo = None        
+        # Progress tracking
+        self._last_api_pct = 0
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_styles()
@@ -207,6 +208,9 @@ class InspectionGUI(tk.Tk):
         
         style.configure("Yellow.Horizontal.TProgressbar", troughcolor="#5c5c5c", background="#eab308",
                         bordercolor="#2a2a2a", lightcolor="#eab308", darkcolor="#eab308")
+        
+        style.configure("Red.Horizontal.TProgressbar", troughcolor="#5c5c5c", background="#dc2626",
+                        bordercolor="#2a2a2a", lightcolor="#dc2626", darkcolor="#dc2626")
 
     def _build_layout(self):
         # root layout
@@ -470,6 +474,9 @@ class InspectionGUI(tk.Tk):
 
                 self._set_light(True, "Scan OK")
                 
+                # Reset progress bar for new inspection
+                self._api_progress_reset()
+                
                 # Warn if no active test case
                 if test_case_id is None:
                     self._log("⚠ Warning: No active test case found")
@@ -527,6 +534,7 @@ class InspectionGUI(tk.Tk):
     def _api_progress_update(self, current: int, total: int, msg: str, had_failure: bool):
         try:
             pct = int((current / max(total, 1)) * 100)
+            self._last_api_pct = pct  # Store for reliable access
             self.api_progress["value"] = pct
             self.api_progress_var.set(f"{pct}% - {msg}")
             self.api_progress.configure(
@@ -619,11 +627,14 @@ class InspectionGUI(tk.Tk):
             self.run_thread.start()
         else:
             self.stop_flag.set()
+            self.start_btn.config(state="disabled")  # Prevent multiple clicks
             self.instructions_var.set("Stopping...")
 
     def _run_inspection_loop(self):
         """Run inspection workflow - purely GUI orchestration."""
         from workflow import run_inspection_with_api
+        
+        outcome = "success"  # Track what happened: success, duplicate, error, stopped
         
         try:
             # Pause live preview during inspection
@@ -643,7 +654,14 @@ class InspectionGUI(tk.Tk):
             )
 
         except DuplicateObservationError as e:
+            outcome = "duplicate"
             self._log(f"✗ Duplicate observation: {e}")
+            
+            # Update progress bar to show duplicate state (preserve percentage)
+            def update_progress():
+                self.api_progress_var.set("Duplicate observation")
+                self.api_progress.configure(style="Yellow.Horizontal.TProgressbar")
+            self.after(0, update_progress)
 
             def show_error():
                 messagebox.showerror(
@@ -655,13 +673,29 @@ class InspectionGUI(tk.Tk):
             self.after(0, show_error)
 
         except Exception as e:
+            outcome = "error"
             self._log(f"✗ Inspection failed: {e}")
+            
+            # Update progress bar to show failure state at current percentage
+            def update_progress():
+                self.api_progress_var.set(f"Failed at {self._last_api_pct}%")
+                self.api_progress.configure(style="Red.Horizontal.TProgressbar")
+            self.after(0, update_progress)
             
             def show_error():
                 messagebox.showerror("Inspection Error", f"Failed: {e}")
             
             self.after(0, show_error)
         finally:
+            # Check if user manually stopped (and no exception occurred)
+            if self.stop_flag.is_set() and outcome == "success":
+                outcome = "stopped"
+                
+                def update_progress():
+                    self.api_progress_var.set(f"Stopped at {self._last_api_pct}%")
+                    self.api_progress.configure(style="Yellow.Horizontal.TProgressbar")
+                self.after(0, update_progress)
+            
             def done():
                 self.is_running = False
                 # Resume live preview
@@ -684,7 +718,8 @@ class InspectionGUI(tk.Tk):
                 self._set_light(False, "Waiting for scan...")
                 self.instructions_var.set("SCAN QR CODE ON BLADE")
 
-                self._api_progress_reset() # Reset progress bar
+                # DON'T reset progress bar - preserve final state
+                # Progress will be reset when user scans next blade
 
                 self.motion.release()  # ensure motor is released after run
                 # IMPORTANT: sync UI state with reality
