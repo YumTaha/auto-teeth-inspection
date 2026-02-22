@@ -54,7 +54,7 @@ class InspectionGUI(tk.Tk):
         self.scan_ok = False
         self.blade_locked = False
 
-        # motor gating + overlay
+        # motor gating
         self.motor_connected = False
         self._motor_retry_job = None
 
@@ -77,44 +77,9 @@ class InspectionGUI(tk.Tk):
         self._build_styles()
         self._build_layout()
         self._install_invisible_qr_entry()
-        self._build_motor_overlay()
 
         # Auto-connect
         self.after(50, self._auto_connect)
-
-    # -------------------------
-    # Overlay (motor required)
-    # -------------------------
-    def _build_motor_overlay(self):
-        """Grey-out overlay shown when motor isn't connected."""
-        self.motor_overlay = tk.Frame(self, bg="#0b0b0b")
-        # "Card" in the center
-        card = tk.Frame(self.motor_overlay, bg="#2a2a2a", bd=0, highlightthickness=0)
-        card.place(relx=0.5, rely=0.5, anchor="center", width=440, height=200)
-
-        tk.Label(
-            card,
-            text="CONNECT THE MOTOR",
-            bg="#2a2a2a",
-            fg="#f5f5f5",
-            font=("Segoe UI", 14, "bold"),
-        ).pack(pady=(18, 8))
-
-        self.motor_overlay_msg = tk.Label(
-            card,
-            text=f"Please connect the motor.",
-            bg="#2a2a2a",
-            fg="#d1d5db",
-            font=("Segoe UI", 11),
-            wraplength=400,
-            justify="center",
-        )
-        self.motor_overlay_msg.pack(pady=(0, 12))
-
-        ttk.Button(card, text="Retry", command=self._retry_motor_connect_once).pack()
-
-        # start hidden
-        self.motor_overlay.place_forget()
 
     def _retry_motor_connect_once(self):
         threading.Thread(target=self._motor_connect_worker, daemon=True).start()
